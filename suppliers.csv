@@ -1,0 +1,7 @@
+supplier_id,name,country,city,lat,lon,component,lead_time_days,backup_supplier,criticality
+S1,EuroParts GmbH,Germany,Munich,48.14,11.58,semiconductor casing,5,S4,high
+S2,Alpine Metals,Austria,Vienna,48.21,16.37,aluminum frame,7,S5,medium
+S3,Polska Electronics,Poland,Warsaw,52.23,21.01,PCB board,4,S6,high
+S4,IberChips SA,Spain,Madrid,40.42,-3.70,semiconductor casing,8,,medium
+S5,Nordic Alloy,Sweden,Gothenburg,57.71,11.97,aluminum frame,9,,low
+S6,Benelux Circuits,Netherlands,Eindhoven,51.44,5.48,PCB board,6,,medium

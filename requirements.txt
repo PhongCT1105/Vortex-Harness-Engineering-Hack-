@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+
+# Optional — add as you wire each sponsor:
+# anthropic            # Claude reasoning agents
+# jua                  # real weather (Jua)
+# composio_openai      # real Slack/email actions (Composio)
+# openai               # used by Composio's OpenAI provider
+# clickhouse-connect   # event log / observability
+# airbyte-agent-sdk    # real context connector (stretch)

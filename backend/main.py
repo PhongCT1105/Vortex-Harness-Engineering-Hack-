@@ -13,6 +13,7 @@ from comms import comms_agent
 from config import FRONTEND_ORIGIN, integration_status, set_keys
 from impact import impact_agent
 from mitigation import mitigation_agent
+from orchestration_chat import answer_incident_question
 from weather import weather_agent
 
 
@@ -68,9 +69,16 @@ class ApproveRequest(BaseModel):
     action: dict
 
 
+class ChatRequest(BaseModel):
+    question: str
+    incident: dict
+
+
 class ConfigRequest(BaseModel):
     JUA_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
+    DEEPSEEK_API_KEY: str | None = None
+    ACTIVE_MODEL: str | None = None
     CLICKHOUSE_HOST: str | None = None
     CLICKHOUSE_PORT: str | None = None
     CLICKHOUSE_USER: str | None = None
@@ -98,6 +106,11 @@ def approve(req: ApproveRequest):
     executed = {**action, "status": "approved", **result}
     log_event("action_executed", executed, action.get("incident_id"))
     return result
+
+
+@app.post("/chat")
+def chat(req: ChatRequest):
+    return answer_incident_question(req.incident, req.question, EVENTS)
 
 
 @app.get("/events")

@@ -6,7 +6,7 @@ countries/severity), then a deterministic mock. Never raises.
 
 import httpx
 
-from config import get_key
+from config import get_active_model, get_key
 
 COUNTRY_COORDS = {
     "Germany": (51.1657, 10.4515),
@@ -112,8 +112,55 @@ def _claude_affected_countries(event_text: str) -> list[str] | None:
         return None
 
 
+def _deepseek_affected_countries(event_text: str) -> list[str] | None:
+    api_key = get_key("DEEPSEEK_API_KEY")
+    if not api_key:
+        return None
+    try:
+        resp = httpx.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "deepseek-chat",
+                "max_tokens": 100,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Given this weather event description, return ONLY a "
+                            "comma-separated list of which of these countries are "
+                            f"affected: {', '.join(COUNTRY_COORDS)}.\n\n"
+                            f"Event: {event_text}"
+                        ),
+                    }
+                ],
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"]
+        countries = [c.strip() for c in text.split(",")]
+        affected = [c for c in countries if c in COUNTRY_COORDS]
+        return affected or None
+    except Exception:
+        return None
+
+
+def _llm_affected_countries(event_text: str) -> list[str] | None:
+    providers = {
+        "claude": _claude_affected_countries,
+        "deepseek": _deepseek_affected_countries,
+    }
+    primary = get_active_model()
+    fallback = "deepseek" if primary == "claude" else "claude"
+    return providers[primary](event_text) or providers[fallback](event_text)
+
+
 def weather_agent(event_text: str) -> dict:
-    affected = _claude_affected_countries(event_text) or ["Germany", "Austria", "Poland"]
+    affected = _llm_affected_countries(event_text) or ["Germany", "Austria", "Poland"]
 
     jua_result = _jua_weather(event_text, affected)
     if jua_result is not None:
