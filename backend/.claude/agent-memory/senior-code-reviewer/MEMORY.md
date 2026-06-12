@@ -1,0 +1,1 @@
+- [open_meteo_connector project facts](project_open_meteo_connector.md) — thresholds, wind=90 boundary subtlety, test file location, pytest setup

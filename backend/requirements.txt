@@ -1,2 +1,2 @@
-jua
+requests
 python-dotenv

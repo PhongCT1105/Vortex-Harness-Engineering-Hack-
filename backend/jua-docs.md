@@ -1,6 +1,16 @@
-# Jua Weather Connector
+# Open-Meteo Weather Connector
 
-`jua_connector.py` provides weather forecast access via the Jua AI SDK. It exposes three public functions: a point forecast, a regional (bounding-box) forecast, and a route scanner that flags hazardous conditions along a sequence of waypoints.
+`open_meteo_connector.py` provides weather forecast access via the [Open-Meteo](https://open-meteo.com) free API. No API key or authentication is required. It exposes three public functions: a point forecast, a regional (bounding-box) forecast, and a route scanner that flags hazardous conditions along a sequence of waypoints.
+
+**Switching from `jua_connector`:** change any import line from:
+```python
+from jua_connector import get_forecast, get_regional_forecast, scan_route
+```
+to:
+```python
+from open_meteo_connector import get_forecast, get_regional_forecast, scan_route
+```
+Function signatures and return shapes are identical.
 
 ---
 
@@ -9,43 +19,18 @@
 **Install dependencies:**
 
 ```bash
-pip install jua python-dotenv
+pip install requests python-dotenv
 ```
 
-**Configure credentials** by copying `.env.example` and filling in your Jua API key:
-
-```bash
-cp .env.example .env
-```
-
-```
-JUA_KEY_ID=your-key-id
-JUA_SECRET=your-secret
-```
-
-Credentials are loaded automatically at import time via `python-dotenv`. In production environments where env vars are already set, `.env` is ignored.
+No credentials required. No `.env` configuration needed.
 
 ---
 
 ## Functions
 
-### `authenticate() -> JuaClient`
-
-Reads `JUA_KEY_ID` and `JUA_SECRET` from the environment and returns an authenticated Jua SDK client. Raises `ValueError` immediately if either variable is missing or empty.
-
-You do not need to call this directly — `get_forecast` and `get_regional_forecast` call it internally. It is exposed for startup validation or testing.
-
-```python
-from jua_connector import authenticate
-
-client = authenticate()  # raises ValueError if credentials are missing
-```
-
----
-
 ### `get_forecast(lat, lon, variables, hours=24) -> dict`
 
-Fetches a point forecast for a single coordinate using the EPT2 model.
+Fetches a point forecast for a single coordinate from the Open-Meteo API.
 
 **Parameters:**
 
@@ -53,47 +38,53 @@ Fetches a point forecast for a single coordinate using the EPT2 model.
 |---|---|---|
 | `lat` | `float` | Latitude (-90 to 90) |
 | `lon` | `float` | Longitude (-180 to 180) |
-| `variables` | `list[str]` | Weather variables to request. The three threshold variables are always included automatically (see below). |
-| `hours` | `int` | Forecast horizon in hours. Default: `24`. |
+| `variables` | `list[str]` | Additional weather variables to request. The three threshold variables are always included automatically. |
+| `hours` | `int` | Forecast horizon in hours. Default: `24`. Maximum: `384` (16 days). |
 
-**Always-included variables** (merged in automatically regardless of what you pass):
-- `wind_speed_at_height_level_10m`
-- `air_temperature_at_height_level_2m`
-- `precipitation_amount_at_surface`
+**Always-included variables** (merged in regardless of what you pass):
+- `wind_speed_at_height_level_10m` — peak value over the horizon, in km/h
+- `air_temperature_at_height_level_2m` — minimum value over the horizon, in K
+- `precipitation_amount_at_surface` — peak value over the horizon, in mm/hr
 
-**Returns:** xarray dataset serialized as a dict (via `.to_xarray().to_dict()`). Data variables are nested under the `"data_vars"` key.
+**Returns:** `{"data_vars": {<variable_name>: {"data": <peak_value>}, ...}}`
 
-**Raises:** `RuntimeError` with a readable message on any SDK or network error.
+Each value is a single float representing the worst-case reading across the full forecast horizon (maximum for wind and precipitation; minimum for temperature). Temperature is stored in Kelvin.
+
+**Raises:** `RuntimeError` with a readable message on any HTTP or network error.
+
+> **Note:** `hours > 384` is silently clamped to 384 (16 days), the Open-Meteo free-tier maximum.
 
 ```python
-from jua_connector import get_forecast
+from open_meteo_connector import get_forecast
 
 data = get_forecast(lat=48.14, lon=11.58, variables=[], hours=24)
-# data["data_vars"]["wind_speed_at_height_level_10m"] → forecast array
+wind  = data["data_vars"]["wind_speed_at_height_level_10m"]["data"]   # km/h
+temp  = data["data_vars"]["air_temperature_at_height_level_2m"]["data"]  # K
+precip = data["data_vars"]["precipitation_amount_at_surface"]["data"]  # mm/hr
 ```
 
 ---
 
 ### `get_regional_forecast(bbox, variables, hours=24) -> dict`
 
-Fetches a forecast over a geographic bounding box using the EPT2 model.
+Fetches a forecast over a geographic bounding box by querying each of the four corners and averaging the results.
 
 **Parameters:**
 
 | Name | Type | Description |
 |---|---|---|
 | `bbox` | `tuple[float, float, float, float]` | `(min_lat, min_lon, max_lat, max_lon)` |
-| `variables` | `list[str]` | Weather variables to request. Threshold variables are always included. |
+| `variables` | `list[str]` | Additional variables to request. Threshold variables are always included. |
 | `hours` | `int` | Forecast horizon in hours. Default: `24`. |
 
-**Returns:** xarray dataset serialized as a dict, same structure as `get_forecast`.
+**Returns:** Same shape as `get_forecast`. Each variable's value is the arithmetic mean of the four corner values. If any corner returns no data for a variable (e.g. all-null response), that variable is omitted from the result rather than averaged over a partial set.
 
 **Raises:**
 - `ValueError` if `bbox` does not contain exactly 4 values.
-- `RuntimeError` on any SDK or network error.
+- `RuntimeError` if any corner request fails.
 
 ```python
-from jua_connector import get_regional_forecast
+from open_meteo_connector import get_regional_forecast
 
 # Germany bounding box
 data = get_regional_forecast(
@@ -101,13 +92,14 @@ data = get_regional_forecast(
     variables=[],
     hours=48,
 )
+avg_wind = data["data_vars"]["wind_speed_at_height_level_10m"]["data"]
 ```
 
 ---
 
 ### `scan_route(waypoints, variables, hours=24) -> list[dict]`
 
-Scans weather conditions along a route by fetching a point forecast for each waypoint sequentially, then classifying the severity of conditions at each point.
+Scans weather conditions along a route by fetching a point forecast for each waypoint sequentially and classifying the severity of conditions at each point.
 
 **Parameters:**
 
@@ -119,7 +111,7 @@ Scans weather conditions along a route by fetching a point forecast for each way
 
 **Raises:** `ValueError` if `waypoints` has fewer than 5 or more than 10 entries.
 
-**Returns:** A list of dicts in the same order as `waypoints`. Each entry is one of:
+**Returns:** A list of dicts in the same order as the input waypoints. Each entry is one of:
 
 **Successful point:**
 ```python
@@ -136,7 +128,7 @@ Scans weather conditions along a route by fetching a point forecast for each way
 }
 ```
 
-**Failed point** (Jua call raised an exception):
+**Failed point** (request raised an exception):
 ```python
 {
     "lat": float,
@@ -147,7 +139,7 @@ Scans weather conditions along a route by fetching a point forecast for each way
 }
 ```
 
-A single failed waypoint does not abort the scan — remaining waypoints are still processed.
+A single failed waypoint does not abort the scan — remaining waypoints are still processed and returned in their original positions.
 
 #### Severity classification
 
@@ -170,25 +162,22 @@ Escalation priority (highest wins):
 
 ## Error handling
 
-All SDK errors are caught and re-raised as `RuntimeError` with a message that identifies the HTTP status code and the affected coordinate or bbox:
+All HTTP errors are caught and re-raised as `RuntimeError` with a message that identifies the status code and the affected coordinate or bbox:
 
 | HTTP status | Error message pattern |
 |---|---|
-| 401 | `Jua authentication failed (...): invalid or missing API credentials` |
-| 403 | `Jua request forbidden (...): account lacks access to this resource` |
-| 400 / credit limit | `Jua quota or billing issue (...): request exceeds credit limit` |
-| 400 (other) | `Jua bad request (...): malformed request parameters` |
-| 402 | `Jua payment required (...): quota or billing issue` |
+| 400 | `Open-Meteo bad request (...): malformed request parameters` |
+| 404 | `Open-Meteo endpoint not found (...): check BASE_URL` |
+| 429 | `Open-Meteo rate limit exceeded (...): too many requests` |
+| 5xx | `Open-Meteo server error (...): HTTP <status>` |
+| Network failure | `Open-Meteo network error (...): <exception>` |
 
 ---
 
 ## Full example: Hamburg → Munich route scan
 
 ```python
-from jua_connector import authenticate, scan_route
-
-# Validate credentials at startup (optional but recommended)
-authenticate()
+from open_meteo_connector import scan_route
 
 # 8 waypoints from Hamburg to Munich
 route = [
@@ -212,14 +201,14 @@ for point in results:
         print(f"  [{point['lat']}, {point['lon']}] {status} — severity: {point['severity']}")
 ```
 
-**Example output:**
+**Example output (live, 2026-06-12):**
 ```
   [53.55, 10.0] OK — severity: ok
   [53.2, 10.4] OK — severity: ok
-  [52.8, 10.9] FLAGGED — severity: minor
+  [52.8, 10.9] OK — severity: ok
   [52.4, 11.5] OK — severity: ok
   [52.1, 12.1] OK — severity: ok
   [51.6, 12.4] OK — severity: ok
-  [51.0, 11.6] FLAGGED — severity: moderate
+  [51.0, 11.6] OK — severity: ok
   [48.14, 11.58] OK — severity: ok
 ```
