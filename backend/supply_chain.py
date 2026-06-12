@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from clickhouse_store import get_latest_product, get_supply_chain, save_supply_chain
+
 SUPPLIERS_CSV = Path(__file__).parent / "suppliers.csv"
 
 # Rough country centroid coordinates — enough for a demo globe.
@@ -148,13 +150,25 @@ def _build_from_dataframe(df: pd.DataFrame, product: str) -> dict:
 
 
 def default_supply_chain(product: str = DEFAULT_PRODUCT) -> dict:
+    stored_chain = get_supply_chain(product)
+    if stored_chain is not None:
+        ACTIVE_SUPPLY_CHAINS[product] = copy.deepcopy(stored_chain)
+        return copy.deepcopy(stored_chain)
+
     if product in ACTIVE_SUPPLY_CHAINS:
         return copy.deepcopy(ACTIVE_SUPPLY_CHAINS[product])
+
     df = pd.read_csv(SUPPLIERS_CSV)
-    return _build_from_dataframe(df, product)
+    chain = _build_from_dataframe(df, product)
+    save_supply_chain(chain, source="bundled_seed")
+    ACTIVE_SUPPLY_CHAINS[product] = copy.deepcopy(chain)
+    return chain
 
 
 def active_product_name() -> str:
+    latest_product = get_latest_product()
+    if latest_product:
+        return latest_product
     return ACTIVE_PRODUCT
 
 
@@ -163,6 +177,7 @@ def parse_supply_chain_csv(content: bytes, product: str = DEFAULT_PRODUCT) -> di
     df = pd.read_csv(io.BytesIO(content))
     df.columns = [c.strip().lower() for c in df.columns]
     chain = _build_from_dataframe(df, product)
+    save_supply_chain(chain, source="csv_upload")
     ACTIVE_SUPPLY_CHAINS[product] = copy.deepcopy(chain)
     ACTIVE_PRODUCT = product
     return chain

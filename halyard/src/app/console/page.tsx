@@ -17,12 +17,14 @@ import {
   AgentEventRow,
   Incident,
   IntegrationStatus,
+  SupplyChainAutomationResult,
   SupplyChainWeather,
   approveAction,
   getConfig,
   getEvents,
   getSupplyChainWeather,
   runIncident,
+  runSupplyChainAutomation,
 } from "@/lib/api";
 import { AgentOutputPanel } from "@/components/AgentOutputPanel";
 import { ConsoleShell, TabKey } from "@/components/console/ConsoleShell";
@@ -49,6 +51,9 @@ export default function ConsolePage() {
   const [supplyWeather, setSupplyWeather] = useState<SupplyChainWeather | null>(null);
   const [supplyWeatherLoading, setSupplyWeatherLoading] = useState(false);
   const [supplyWeatherError, setSupplyWeatherError] = useState<string | null>(null);
+  const [automation, setAutomation] = useState<SupplyChainAutomationResult | null>(null);
+  const [automationLoading, setAutomationLoading] = useState(false);
+  const [automationError, setAutomationError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
 
   useEffect(() => {
@@ -76,6 +81,22 @@ export default function ConsolePage() {
       setSupplyWeatherError(err instanceof Error ? err.message : "Failed to fetch supply-chain weather");
     } finally {
       setSupplyWeatherLoading(false);
+    }
+  }
+
+  async function handleSupplyAutomation(forceRefresh: boolean) {
+    setAutomationLoading(true);
+    setAutomationError(null);
+    try {
+      const result = await runSupplyChainAutomation({ forceRefresh });
+      setAutomation(result);
+      const latestWeather = await getSupplyChainWeather({ forceRefresh: false });
+      setSupplyWeather(latestWeather);
+      getEvents().then(setLogs).catch(() => {});
+    } catch (err) {
+      setAutomationError(err instanceof Error ? err.message : "Failed to run automation");
+    } finally {
+      setAutomationLoading(false);
     }
   }
 
@@ -280,6 +301,10 @@ export default function ConsolePage() {
         loading={supplyWeatherLoading}
         error={supplyWeatherError}
         onRefresh={() => loadSupplyWeather(true)}
+        automation={automation}
+        automationLoading={automationLoading}
+        automationError={automationError}
+        onAutomate={(forceRefresh) => handleSupplyAutomation(forceRefresh)}
       />
       )}
 
@@ -386,11 +411,19 @@ function SupplyWeatherPanel({
   loading,
   error,
   onRefresh,
+  automation,
+  automationLoading,
+  automationError,
+  onAutomate,
 }: {
   weather: SupplyChainWeather | null;
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
+  automation: SupplyChainAutomationResult | null;
+  automationLoading: boolean;
+  automationError: string | null;
+  onAutomate: (forceRefresh: boolean) => void;
 }) {
   const generated = weather ? new Date(weather.generated_at).toLocaleString() : "Not loaded";
   const expires = weather ? new Date(weather.expires_at).toLocaleString() : "Not loaded";
@@ -406,17 +439,28 @@ function SupplyWeatherPanel({
               {weather ? Math.round(weather.refresh_seconds / 3600) : 4} hours.
             </p>
           </div>
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="flex w-fit items-center gap-2 rounded-full border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? <Spinner /> : <ArrowClockwise size={16} weight="bold" />}
-            Refresh
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="flex w-fit items-center gap-2 rounded-full border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? <Spinner /> : <ArrowClockwise size={16} weight="bold" />}
+              Refresh
+            </button>
+            <button
+              onClick={() => onAutomate(false)}
+              disabled={automationLoading}
+              className="flex w-fit items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {automationLoading ? <Spinner /> : <Sparkle size={16} weight="bold" />}
+              Run automation
+            </button>
+          </div>
         </div>
 
         {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+        {automationError && <p className="mt-4 text-sm text-red-400">{automationError}</p>}
 
         <div className="mt-5 grid gap-4 text-sm sm:grid-cols-4">
           <Stat label="Worst level" value={weather?.worst_risk_level ?? "Loading"} />
@@ -425,6 +469,47 @@ function SupplyWeatherPanel({
           <Stat label="Next refresh" value={expires} />
         </div>
       </div>
+
+      {automation && (
+        <div className="rounded-2xl border border-border bg-surface p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-base font-semibold">Automation report</h3>
+              <p className="mt-1 text-sm text-text-muted">{automation.report.executive_summary}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <RiskLevelPill level={automation.report.current_condition} />
+              <span className="rounded-full border border-border px-2.5 py-1 text-xs text-text-muted">
+                {automation.weather_source === "clickhouse_cached" ? "ClickHouse cached" : "Refreshed"}
+              </span>
+              <span className="rounded-full border border-border px-2.5 py-1 text-xs text-text-muted">
+                Slack {automation.dispatch.slack.sent ? "sent" : automation.dispatch.slack.configured ? "failed" : "mock"}
+              </span>
+              <span className="rounded-full border border-border px-2.5 py-1 text-xs text-text-muted">
+                Airbyte {automation.dispatch.airbyte.sent ? "sent" : automation.dispatch.airbyte.configured ? "configured" : "off"}
+              </span>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            <div className="rounded-xl border border-border bg-surface-2 p-3">
+              <p className="text-xs uppercase tracking-wide text-text-muted">Recommended actions</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {automation.report.recommended_actions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-xl border border-border bg-surface-2 p-3">
+              <p className="text-xs uppercase tracking-wide text-text-muted">Exposure summary</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {automation.report.exposure_summary.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!weather && !error && (
         <div className="rounded-2xl border border-dashed border-border bg-surface/40 p-8 text-sm text-text-muted">

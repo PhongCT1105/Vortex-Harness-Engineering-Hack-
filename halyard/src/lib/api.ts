@@ -103,6 +103,7 @@ export type ConfigKeys = {
   CLICKHOUSE_PASSWORD?: string;
   CLICKHOUSE_DATABASE?: string;
   AIRBYTE_API_KEY?: string;
+  AIRBYTE_REPORT_WEBHOOK_URL?: string;
   SLACK_WEBHOOK_URL?: string;
   SLACK_CHANNEL?: string;
 };
@@ -269,6 +270,33 @@ export type SupplyChainWeather = {
   }>;
 };
 
+export type SupplyChainAutomationReport = {
+  source: "claude" | "deepseek" | "rules";
+  product: string;
+  automation_id: string;
+  current_condition: "normal" | "watch" | "high" | "severe";
+  executive_summary: string;
+  exposure_summary: string[];
+  recommended_actions: string[];
+  requires_human_attention: boolean;
+  urgency: "normal" | "watch" | "urgent";
+  confidence: number;
+  tool_calls?: unknown[];
+};
+
+export type SupplyChainAutomationResult = {
+  automation_id: string;
+  product: string;
+  weather_source: "clickhouse_cached" | "refreshed";
+  weather_generated_at: string;
+  report: SupplyChainAutomationReport;
+  dispatch: {
+    airbyte: { configured: boolean; sent: boolean; error?: string };
+    slack: { configured: boolean; sent: boolean; channel: string; error?: string };
+    body: string;
+  };
+};
+
 export function getSupplyChain(product?: string): Promise<SupplyChain> {
   const qs = product ? `?product=${encodeURIComponent(product)}` : "";
   return request<SupplyChain>(`/supply-chain${qs}`);
@@ -297,4 +325,17 @@ export async function uploadSupplyChain(file: File, product: string): Promise<Su
     throw new Error(`POST /supply-chain/upload failed: ${res.status}`);
   }
   return res.json();
+}
+
+export function runSupplyChainAutomation(options?: {
+  product?: string;
+  forceRefresh?: boolean;
+}): Promise<SupplyChainAutomationResult> {
+  return request<SupplyChainAutomationResult>("/automation/supply-chain/report", {
+    method: "POST",
+    body: JSON.stringify({
+      product: options?.product,
+      force_refresh: options?.forceRefresh ?? false,
+    }),
+  });
 }

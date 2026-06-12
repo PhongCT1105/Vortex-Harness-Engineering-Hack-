@@ -14,8 +14,10 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import {
   SupplyChain,
+  SupplyChainAutomationResult,
   SupplyChainNode,
   getSupplyChain,
+  runSupplyChainAutomation,
   uploadSupplyChain,
 } from "@/lib/api";
 import { SupplyChainGlobe } from "@/components/supply-chain/SupplyChainGlobe";
@@ -35,6 +37,8 @@ export default function SupplyChainPage() {
   const [data, setData] = useState<SupplyChain | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [automation, setAutomation] = useState<SupplyChainAutomationResult | null>(null);
+  const [automationError, setAutomationError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SupplyChainNode | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -60,10 +64,22 @@ export default function SupplyChainPage() {
   async function handleFile(file: File) {
     setLoading(true);
     setError(null);
+    setAutomationError(null);
     try {
       const result = await uploadSupplyChain(file, product || "Product");
       setData(result);
       setSelected(null);
+      try {
+        const automationResult = await runSupplyChainAutomation({
+          product: result.product,
+          forceRefresh: false,
+        });
+        setAutomation(automationResult);
+      } catch (automationErr) {
+        setAutomationError(
+          automationErr instanceof Error ? automationErr.message : "Failed to run automation"
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to upload supply chain");
     } finally {
@@ -183,8 +199,25 @@ export default function SupplyChainPage() {
             </p>
           )}
 
+          {automationError && (
+            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              Map loaded, but automation failed: {automationError}
+            </p>
+          )}
+
           {data && (
             <>
+              {automation && (
+                <div className="rounded-xl border border-border bg-surface-2 px-3 py-3 text-xs text-text-muted">
+                  <p className="font-medium text-text">Automation report generated</p>
+                  <p className="mt-1">{automation.report.executive_summary}</p>
+                  <p className="mt-2">
+                    Source: {automation.weather_source === "clickhouse_cached" ? "ClickHouse cached weather" : "fresh weather refresh"} · Slack{" "}
+                    {automation.dispatch.slack.sent ? "sent" : automation.dispatch.slack.configured ? "failed" : "mock"}
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <StatCard label="Resources" value={data.nodes.length.toString()} />
                 <StatCard

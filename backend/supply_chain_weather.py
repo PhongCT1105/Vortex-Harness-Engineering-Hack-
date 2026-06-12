@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from clickhouse_store import get_weather_snapshot, save_weather_snapshot
 from config import get_key
 from supply_chain import ASSEMBLY_PLANT, DEFAULT_PRODUCT, default_supply_chain
 
@@ -451,15 +452,24 @@ def refresh_supply_chain_weather(product: str = DEFAULT_PRODUCT) -> dict[str, An
     with _LOCK:
         _CACHE = payload
         _CACHE_TS = time.time()
+    save_weather_snapshot(payload)
     return payload
 
 
 def get_supply_chain_weather(product: str = DEFAULT_PRODUCT, force_refresh: bool = False) -> dict[str, Any]:
+    global _CACHE, _CACHE_TS
     with _LOCK:
         cache = _CACHE
         age = time.time() - _CACHE_TS
     if not force_refresh and cache is not None and age < REFRESH_SECONDS and cache.get("product") == product:
         return cache
+    if not force_refresh:
+        stored = get_weather_snapshot(product, require_fresh=True)
+        if stored is not None:
+            with _LOCK:
+                _CACHE = stored
+                _CACHE_TS = time.time()
+            return stored
     return refresh_supply_chain_weather(product)
 
 

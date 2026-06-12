@@ -35,3 +35,58 @@ def comms_agent(action: dict) -> dict:
 
     print(f"[mock comms -> {channel}] {body}")
     return {"channel": channel, "sent": False, "body": body}
+
+
+def _format_report(report: dict) -> str:
+    actions = report.get("recommended_actions") or []
+    action_lines = "\n".join(f"- {action}" for action in actions[:5]) or "- Continue monitoring."
+    return (
+        f"[StormOps Daily Supply-Chain Report]\n"
+        f"Product: {report.get('product', 'unknown')}\n"
+        f"Condition: {report.get('current_condition', 'unknown')}\n"
+        f"Urgency: {report.get('urgency', 'normal')}\n"
+        f"Summary: {report.get('executive_summary', 'No summary generated.')}\n"
+        f"Recommended actions:\n{action_lines}"
+    )
+
+
+def dispatch_report(report: dict) -> dict:
+    """Send a supply-chain report to the configured downstream channel.
+
+    If AIRBYTE_REPORT_WEBHOOK_URL is configured, it receives the structured report.
+    Slack receives the human-readable message when SLACK_WEBHOOK_URL is configured.
+    """
+    body = _format_report(report)
+    result = {
+        "airbyte": {"configured": False, "sent": False},
+        "slack": {"configured": False, "sent": False, "channel": get_key("SLACK_CHANNEL") or SLACK_CHANNEL_DEFAULT},
+        "body": body,
+    }
+
+    airbyte_webhook = get_key("AIRBYTE_REPORT_WEBHOOK_URL")
+    if airbyte_webhook:
+        result["airbyte"]["configured"] = True
+        try:
+            resp = httpx.post(airbyte_webhook, json={"report": report, "text": body}, timeout=10)
+            resp.raise_for_status()
+            result["airbyte"]["sent"] = True
+        except Exception as exc:
+            result["airbyte"]["error"] = str(exc)
+    elif get_key("AIRBYTE_API_KEY"):
+        result["airbyte"]["configured"] = True
+        result["airbyte"]["error"] = "AIRBYTE_API_KEY is set, but AIRBYTE_REPORT_WEBHOOK_URL is missing."
+
+    slack_webhook = get_key("SLACK_WEBHOOK_URL")
+    if slack_webhook:
+        result["slack"]["configured"] = True
+        try:
+            resp = httpx.post(slack_webhook, json={"text": body}, timeout=10)
+            resp.raise_for_status()
+            result["slack"]["sent"] = True
+        except Exception as exc:
+            result["slack"]["error"] = str(exc)
+
+    if not result["airbyte"]["sent"] and not result["slack"]["sent"]:
+        print(f"[mock report -> {result['slack']['channel']}] {body}")
+
+    return result

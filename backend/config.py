@@ -33,6 +33,7 @@ PLUGGABLE_KEYS = [
     "CLICKHOUSE_PASSWORD",
     "CLICKHOUSE_DATABASE",
     "AIRBYTE_API_KEY",
+    "AIRBYTE_REPORT_WEBHOOK_URL",
     "SLACK_WEBHOOK_URL",
     "SLACK_CHANNEL",
     "ACTIVE_MODEL",
@@ -73,7 +74,7 @@ def integration_status() -> dict[str, bool | str]:
         "anthropic": get_key("ANTHROPIC_API_KEY") is not None,
         "deepseek": get_key("DEEPSEEK_API_KEY") is not None,
         "clickhouse": get_key("CLICKHOUSE_HOST") is not None,
-        "airbyte": get_key("AIRBYTE_API_KEY") is not None,
+        "airbyte": get_key("AIRBYTE_API_KEY") is not None or get_key("AIRBYTE_REPORT_WEBHOOK_URL") is not None,
         "slack": get_key("SLACK_WEBHOOK_URL") is not None,
         "active_model": get_active_model(),
     }

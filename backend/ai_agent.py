@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from clickhouse_store import get_recent_events, get_supply_chain_summary, get_weather_snapshot
 from config import get_active_model, get_key
 from supply_chain import DEFAULT_PRODUCT
 from supply_chain_weather import get_supply_chain_weather, run_weather_tool, weather_tool_definitions
@@ -79,7 +80,7 @@ def _anthropic_tool_json(prompt: str, max_tokens: int = 1200) -> tuple[dict[str,
             json={
                 "model": get_key("ANTHROPIC_MODEL") or "claude-sonnet-4-5",
                 "max_tokens": max_tokens,
-                "tools": weather_tool_definitions(),
+                "tools": orchestration_tool_definitions(),
                 "messages": messages,
             },
             timeout=30,
@@ -95,7 +96,7 @@ def _anthropic_tool_json(prompt: str, max_tokens: int = 1200) -> tuple[dict[str,
         for block in tool_uses[:3]:
             name = block["name"]
             tool_input = block.get("input") or {}
-            result = run_weather_tool(name, tool_input)
+            result = run_orchestration_tool(name, tool_input)
             compact_result = _compact_tool_result(result)
             tool_calls.append({"name": name, "input": tool_input, "result": compact_result})
             tool_results.append(
@@ -131,6 +132,16 @@ def _anthropic_tool_json(prompt: str, max_tokens: int = 1200) -> tuple[dict[str,
 
 
 def _compact_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    if "top_suppliers" in result:
+        return {
+            "product": result.get("product"),
+            "uploaded_at": result.get("uploaded_at"),
+            "source": result.get("source"),
+            "total_value_usd": result.get("total_value_usd"),
+            "unresolved_countries": result.get("unresolved_countries", []),
+            "countries": result.get("countries", [])[:8],
+            "top_suppliers": result.get("top_suppliers", [])[:8],
+        }
     if "countries" in result:
         return {
             "product": result.get("product"),
@@ -178,7 +189,103 @@ def _compact_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 for route in result.get("routes", [])[:8]
             ],
         }
+    if "events" in result:
+        return {
+            "events": [
+                {
+                    "ts": event.get("ts"),
+                    "incident_id": event.get("incident_id"),
+                    "kind": event.get("kind"),
+                }
+                for event in result.get("events", [])[-20:]
+            ]
+        }
     return result
+
+
+def orchestration_tool_definitions() -> list[dict[str, Any]]:
+    return weather_tool_definitions() + [
+        {
+            "name": "get_clickhouse_supply_chain_summary",
+            "description": (
+                "Read the current active supply-chain map persisted in ClickHouse, including "
+                "country exposure, top suppliers, upload batch, and total value."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "product": {"type": "string", "description": "Product name to inspect."},
+                },
+                "required": [],
+            },
+        },
+        {
+            "name": "get_clickhouse_weather_snapshot",
+            "description": (
+                "Read the latest ClickHouse supply-chain weather snapshot for the current product. "
+                "Use this to verify current country and route conditions stored by the pipeline."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "product": {"type": "string", "description": "Product name to inspect."},
+                    "require_fresh": {
+                        "type": "boolean",
+                        "description": "Only return snapshots that have not expired.",
+                    },
+                },
+                "required": [],
+            },
+        },
+        {
+            "name": "get_clickhouse_recent_events",
+            "description": (
+                "Read recent audit events from ClickHouse, optionally scoped to an incident id. "
+                "Use this to understand what the live pipeline has already logged."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "incident_id": {"type": "string", "description": "Optional incident id."},
+                    "limit": {"type": "integer", "description": "Maximum rows to inspect."},
+                },
+                "required": [],
+            },
+        },
+    ]
+
+
+def run_orchestration_tool(name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    product = str(tool_input.get("product") or DEFAULT_PRODUCT)
+    if name in {"get_supply_chain_weather_intelligence", "lookup_route_weather"}:
+        return run_weather_tool(name, tool_input)
+    if name == "get_clickhouse_supply_chain_summary":
+        return get_supply_chain_summary(product) or {
+            "product": product,
+            "available": False,
+            "reason": "No ClickHouse supply-chain snapshot is available.",
+        }
+    if name == "get_clickhouse_weather_snapshot":
+        require_fresh = bool(tool_input.get("require_fresh", True))
+        snapshot = get_weather_snapshot(product, require_fresh=require_fresh)
+        if snapshot is None:
+            return {
+                "product": product,
+                "available": False,
+                "reason": "No matching ClickHouse weather snapshot is available.",
+            }
+        return snapshot
+    if name == "get_clickhouse_recent_events":
+        raw_limit = tool_input.get("limit", 25)
+        try:
+            limit = max(1, min(100, int(raw_limit)))
+        except (TypeError, ValueError):
+            limit = 25
+        incident_id = tool_input.get("incident_id")
+        return {
+            "events": get_recent_events(limit, str(incident_id) if incident_id else None) or [],
+        }
+    return {"error": f"Unknown orchestration tool: {name}"}
 
 
 def _deepseek_json(prompt: str, max_tokens: int = 700) -> dict[str, Any] | None:
@@ -223,12 +330,15 @@ def orchestration_agent(
     impact: dict,
     actions: list[dict],
     product: str = DEFAULT_PRODUCT,
+    incident_id: str | None = None,
 ) -> dict:
     prompt = f"""
-You are a supply-chain incident commander. Use the provided incident data and, when useful,
-call the available weather tools to inspect the current uploaded supply chain and possible
-supplier-to-assembly route weather. The route tools refresh every 4 hours unless explicitly
-forced.
+You are a supply-chain incident commander. Use the provided incident data and call tools
+to inspect the real current state before answering. In particular:
+- Use ClickHouse supply-chain tools to verify the current uploaded map and supplier exposure.
+- Use ClickHouse weather snapshot tools to verify the latest persisted weather condition.
+- Use recent event tools to inspect what the pipeline has already logged for this incident.
+- Use route weather tools when route-level conditions matter.
 Return strict JSON with this exact shape:
 {{
   "source": "claude|deepseek|rules",
@@ -244,6 +354,9 @@ Return strict JSON with this exact shape:
 
 Product:
 {product}
+
+Incident id:
+{incident_id or ""}
 
 Trigger event:
 {event_text}
@@ -308,4 +421,103 @@ Proposed actions:
             }
         ],
         "confidence": 0.55,
+    }
+
+
+def supply_chain_report_agent(
+    product: str,
+    chain: dict[str, Any],
+    weather_snapshot: dict[str, Any],
+    automation_id: str | None = None,
+) -> dict[str, Any]:
+    prompt = f"""
+You are the StormOps automation analyst. Create an operational report from the current
+ClickHouse-backed supply-chain map and latest persisted weather snapshot.
+
+Call tools to verify the current ClickHouse supply-chain summary, latest weather snapshot,
+and recent audit events before producing the report. This may be a normal operating day;
+do not invent an incident if the weather is normal. Still provide useful monitoring and
+procurement/logistics actions.
+
+Return strict JSON with this exact shape:
+{{
+  "source": "claude|deepseek|rules",
+  "product": "{product}",
+  "automation_id": "{automation_id or ''}",
+  "current_condition": "normal|watch|high|severe",
+  "executive_summary": "one concise paragraph",
+  "exposure_summary": ["short exposure bullets"],
+  "recommended_actions": ["actions to send downstream"],
+  "requires_human_attention": false,
+  "urgency": "normal|watch|urgent",
+  "confidence": 0.0
+}}
+
+Product:
+{product}
+
+Current map shape:
+{json.dumps({
+    "node_count": len(chain.get("nodes", [])),
+    "route_count": len(chain.get("arcs", [])),
+    "total_value_usd": chain.get("total_value_usd"),
+    "unresolved_countries": chain.get("unresolved_countries", []),
+}, default=str)}
+
+Latest weather snapshot:
+{json.dumps({
+    "generated_at": weather_snapshot.get("generated_at"),
+    "expires_at": weather_snapshot.get("expires_at"),
+    "worst_risk_level": weather_snapshot.get("worst_risk_level"),
+    "max_severity": weather_snapshot.get("max_severity"),
+    "country_count": len(weather_snapshot.get("countries", [])),
+    "route_count": len(weather_snapshot.get("routes", [])),
+}, default=str)}
+"""
+    tool_calls: list[dict[str, Any]] = []
+    if get_active_model() == "claude":
+        data, tool_calls = _anthropic_tool_json(prompt, max_tokens=1400)
+        if data:
+            data["source"] = "claude"
+            data["product"] = data.get("product") or product
+            data["automation_id"] = data.get("automation_id") or automation_id or ""
+            data["tool_calls"] = tool_calls
+            return data
+
+    data = llm_json(prompt, max_tokens=1000)
+    if data:
+        data["source"] = get_active_model()
+        data["product"] = data.get("product") or product
+        data["automation_id"] = data.get("automation_id") or automation_id or ""
+        data["tool_calls"] = tool_calls
+        return data
+
+    countries = weather_snapshot.get("countries", [])
+    routes = weather_snapshot.get("routes", [])
+    worst = weather_snapshot.get("worst_risk_level", "normal")
+    top_countries = ", ".join(country.get("country", "") for country in countries[:3]) or "no exposed countries"
+    return {
+        "source": "rules",
+        "product": product,
+        "automation_id": automation_id or "",
+        "current_condition": worst,
+        "executive_summary": (
+            f"{product} supply-chain weather is currently {worst}. "
+            f"{len(chain.get('nodes', []))} suppliers and {len(routes)} lanes are monitored; "
+            f"top monitored countries are {top_countries}."
+        ),
+        "exposure_summary": [
+            f"Total monitored value is ${int(chain.get('total_value_usd') or 0):,}.",
+            f"Latest weather snapshot was generated at {weather_snapshot.get('generated_at')}.",
+            f"Max route/country severity is {weather_snapshot.get('max_severity', 0)}.",
+        ],
+        "recommended_actions": [
+            "Keep monitoring the current ClickHouse weather snapshot until it expires.",
+            "No emergency reroute is recommended unless severity rises above watch.",
+            "Review high-value supplier lanes in the next operations standup.",
+        ],
+        "requires_human_attention": worst in {"high", "severe"},
+        "urgency": "urgent" if worst in {"high", "severe"} else "watch" if worst == "watch" else "normal",
+        "tool_calls": tool_calls,
+        "confidence": 0.6,
     }
