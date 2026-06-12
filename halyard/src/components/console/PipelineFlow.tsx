@@ -21,15 +21,46 @@ type FlowNode = {
   key: string;
   label: string;
   sublabel: string;
+  helpText: string;
   icon: typeof CloudLightning;
 };
 
 const NODES: FlowNode[] = [
-  { key: "trigger", label: "Trigger", sublabel: "NL event", icon: Lightning },
-  { key: "weather", label: "Weather agent", sublabel: "Jua forecast", icon: CloudLightning },
-  { key: "impact", label: "Impact agent", sublabel: "Supplier graph", icon: Compass },
-  { key: "mitigation", label: "Mitigation agent", sublabel: "Reroute / expedite", icon: Brain },
-  { key: "comms", label: "Comms agent", sublabel: "Composio · Airbyte", icon: PaperPlaneTilt },
+  {
+    key: "trigger",
+    label: "Trigger",
+    sublabel: "NL event",
+    helpText: "A natural-language event kicks off a new incident run.",
+    icon: Lightning,
+  },
+  {
+    key: "weather",
+    label: "Weather agent",
+    sublabel: "Jua forecast",
+    helpText: "Pulls live forecast data and scores storm severity.",
+    icon: CloudLightning,
+  },
+  {
+    key: "impact",
+    label: "Impact agent",
+    sublabel: "Supplier graph",
+    helpText: "Maps the weather risk onto suppliers and shipments.",
+    icon: Compass,
+  },
+  {
+    key: "mitigation",
+    label: "Mitigation agent",
+    sublabel: "Reroute / expedite",
+    helpText: "Proposes reroutes, expedites, and approval-gated actions.",
+    icon: Brain,
+  },
+  {
+    key: "comms",
+    label: "Comms agent",
+    sublabel: "Slack · Email",
+    helpText: "Sends alerts to Slack/email and logs the audit trail.",
+    icon: PaperPlaneTilt,
+  },
 ];
 
 const STATE_STYLES: Record<NodeState, string> = {
@@ -93,7 +124,7 @@ export function PipelineFlow({
                     : { scale: 1 }
                 }
                 transition={{ duration: 1.4, repeat: state === "active" ? Infinity : 0, ease: "easeInOut" }}
-                className={`flex min-w-[9.5rem] flex-col gap-2 rounded-xl border px-3.5 py-3 transition-colors ${STATE_STYLES[state]}`}
+                className={`flex min-w-[11.5rem] flex-col gap-2 rounded-xl border px-3.5 py-3 transition-colors ${STATE_STYLES[state]}`}
               >
                 <div className="flex items-center justify-between">
                   <Icon size={18} weight="bold" />
@@ -104,6 +135,7 @@ export function PipelineFlow({
                 <div>
                   <p className="text-sm font-medium leading-tight">{node.label}</p>
                   <p className="mt-0.5 text-[11px] leading-tight text-text-muted">{node.sublabel}</p>
+                  <p className="mt-0.5 text-[10px] leading-tight text-text-muted/70">{node.helpText}</p>
                 </div>
               </motion.div>
               {i < NODES.length - 1 && (

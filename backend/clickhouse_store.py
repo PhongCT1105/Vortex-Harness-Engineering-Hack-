@@ -194,6 +194,21 @@ def ensure_schema() -> bool:
             ORDER BY (product, generated_ts, supplier_id)
             """
         )
+        client.command(
+            """
+            CREATE TABLE IF NOT EXISTS automation_context_snapshots (
+                created_ts Float64,
+                automation_id String,
+                product String,
+                trigger_source String,
+                weather_source String,
+                worst_risk_level String,
+                max_severity Float64,
+                payload String
+            ) ENGINE = MergeTree
+            ORDER BY (product, created_ts, automation_id)
+            """
+        )
         _schema_ready = True
         return True
     except Exception:
@@ -211,6 +226,7 @@ def reset_schema() -> bool:
         return False
 
     for table in (
+        "automation_context_snapshots",
         "supply_chain_weather_routes",
         "supply_chain_weather_countries",
         "supply_chain_weather_snapshots",
@@ -263,6 +279,63 @@ def get_events(limit: int = 500) -> list[dict[str, Any]] | None:
             }
             for ts, incident_id, kind, payload in result.result_rows
         ]
+    except Exception:
+        return None
+
+
+def save_context_snapshot(context: dict[str, Any]) -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.insert(
+            "automation_context_snapshots",
+            [
+                [
+                    float(context["created_ts"]),
+                    str(context["automation_id"]),
+                    str(context["product"]),
+                    str(context.get("trigger_source") or ""),
+                    str(context.get("weather_source") or ""),
+                    str(context.get("worst_risk_level") or ""),
+                    float(context.get("max_severity") or 0),
+                    _json_dumps(context),
+                ]
+            ],
+            column_names=[
+                "created_ts",
+                "automation_id",
+                "product",
+                "trigger_source",
+                "weather_source",
+                "worst_risk_level",
+                "max_severity",
+                "payload",
+            ],
+        )
+        return True
+    except Exception:
+        return False
+
+
+def get_latest_context(product: str) -> dict[str, Any] | None:
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        result = client.query(
+            """
+            SELECT payload
+            FROM automation_context_snapshots
+            WHERE product = %(product)s
+            ORDER BY created_ts DESC
+            LIMIT 1
+            """,
+            parameters={"product": product},
+        )
+        if not result.result_rows:
+            return None
+        return _json_loads(result.result_rows[0][0])
     except Exception:
         return None
 

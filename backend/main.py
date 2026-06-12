@@ -10,20 +10,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from clickhouse_log import log_event, read_events
-from clickhouse_store import ensure_schema, get_weather_snapshot, is_available as clickhouse_is_available, reset_schema
-from comms import comms_agent, dispatch_report
-from config import FRONTEND_ORIGIN, integration_status, set_keys
-from ai_agent import orchestration_agent, supply_chain_report_agent
+from automation import run_real_weather_pipeline
+from clickhouse_store import ensure_schema, is_available as clickhouse_is_available, reset_schema
+from comms import action_required_alert, comms_agent
+from config import AUTO_PIPELINE_ENABLED, AUTO_PIPELINE_RUN_ON_STARTUP, FRONTEND_ORIGIN, integration_status, set_keys
+from ai_agent import orchestration_agent
 from impact import impact_agent
 from mitigation import mitigation_agent
 from orchestration_chat import answer_incident_question
 from supply_chain import DEFAULT_PRODUCT, active_product_name, default_supply_chain, parse_supply_chain_csv
 from supply_chain_weather import (
+    REFRESH_SECONDS,
     get_route_weather,
     get_supply_chain_weather,
     invalidate_supply_chain_weather,
-    periodic_supply_chain_weather_refresh,
-    refresh_supply_chain_weather,
 )
 from weather import weather_agent
 
@@ -82,6 +82,10 @@ def run_pipeline(event_text: str, product: str | None = None) -> dict:
             log_event("action_executed", executed, incident_id)
             auto_executed.append(executed)
 
+    if pending_approval:
+        alert_result = action_required_alert(pending_approval, incident_id)
+        log_event("approval_alert_sent", alert_result, incident_id)
+
     return {
         "incident_id": incident_id,
         "product": product_name,
@@ -107,7 +111,27 @@ app.add_middleware(
 async def start_supply_chain_weather_refresh():
     ensure_schema()
     default_supply_chain(DEFAULT_PRODUCT)
-    asyncio.create_task(periodic_supply_chain_weather_refresh(DEFAULT_PRODUCT))
+    if AUTO_PIPELINE_ENABLED:
+        asyncio.create_task(periodic_real_weather_pipeline(DEFAULT_PRODUCT))
+    if AUTO_PIPELINE_ENABLED and AUTO_PIPELINE_RUN_ON_STARTUP:
+        asyncio.create_task(
+            asyncio.to_thread(
+                run_real_weather_pipeline,
+                DEFAULT_PRODUCT,
+                False,
+                "startup",
+            )
+        )
+
+
+async def periodic_real_weather_pipeline(product: str = DEFAULT_PRODUCT) -> None:
+    await asyncio.sleep(REFRESH_SECONDS)
+    while True:
+        try:
+            await asyncio.to_thread(run_real_weather_pipeline, product, False, "scheduled_weather_fetch")
+        except Exception as exc:
+            log_event("automation_failed", {"product": product, "trigger_source": "scheduled_weather_fetch", "error": str(exc)})
+        await asyncio.sleep(REFRESH_SECONDS)
 
 
 class RunRequest(BaseModel):
@@ -147,6 +171,13 @@ class ConfigRequest(BaseModel):
     AIRBYTE_REPORT_WEBHOOK_URL: str | None = None
     SLACK_WEBHOOK_URL: str | None = None
     SLACK_CHANNEL: str | None = None
+    DASHBOARD_WEBHOOK_URL: str | None = None
+    SMTP_HOST: str | None = None
+    SMTP_PORT: str | None = None
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+    SUPPLIER_ALERT_EMAIL: str | None = None
 
 
 @app.get("/health")
@@ -174,7 +205,14 @@ async def upload_supply_chain(file: UploadFile = File(...), product: str = Form(
     content = await file.read()
     chain = parse_supply_chain_csv(content, product)
     invalidate_supply_chain_weather(product)
-    asyncio.create_task(asyncio.to_thread(refresh_supply_chain_weather, product))
+    asyncio.create_task(
+        asyncio.to_thread(
+            run_real_weather_pipeline,
+            product,
+            True,
+            "csv_upload",
+        )
+    )
     return chain
 
 
@@ -185,58 +223,8 @@ def run(req: RunRequest):
 
 @app.post("/automation/supply-chain/report")
 def supply_chain_report(req: AutomationRequest):
-    automation_id = uuid.uuid4().hex[:8]
     product_name = _product(req.product)
-    log_event(
-        "automation_started",
-        {"automation_id": automation_id, "product": product_name, "force_refresh": req.force_refresh},
-        automation_id,
-    )
-
-    chain = default_supply_chain(product_name)
-    fresh_snapshot = None if req.force_refresh else get_weather_snapshot(product_name, require_fresh=True)
-
-    if fresh_snapshot is not None:
-        weather_snapshot = fresh_snapshot
-        log_event(
-            "weather_snapshot_reused",
-            {
-                "automation_id": automation_id,
-                "product": product_name,
-                "generated_at": weather_snapshot.get("generated_at"),
-                "expires_at": weather_snapshot.get("expires_at"),
-            },
-            automation_id,
-        )
-    else:
-        weather_snapshot = get_supply_chain_weather(product_name, force_refresh=True)
-        log_event(
-            "weather_snapshot_refreshed",
-            {
-                "automation_id": automation_id,
-                "product": product_name,
-                "generated_at": weather_snapshot.get("generated_at"),
-                "expires_at": weather_snapshot.get("expires_at"),
-                "worst_risk_level": weather_snapshot.get("worst_risk_level"),
-                "max_severity": weather_snapshot.get("max_severity"),
-            },
-            automation_id,
-        )
-
-    report = supply_chain_report_agent(product_name, chain, weather_snapshot, automation_id)
-    log_event("automation_report_generated", report, automation_id)
-
-    dispatch = dispatch_report(report)
-    log_event("automation_report_dispatched", dispatch, automation_id)
-
-    return {
-        "automation_id": automation_id,
-        "product": product_name,
-        "weather_source": "clickhouse_cached" if fresh_snapshot is not None else "refreshed",
-        "weather_generated_at": weather_snapshot.get("generated_at"),
-        "report": report,
-        "dispatch": dispatch,
-    }
+    return run_real_weather_pipeline(product_name, req.force_refresh, "manual")
 
 
 @app.post("/approve")

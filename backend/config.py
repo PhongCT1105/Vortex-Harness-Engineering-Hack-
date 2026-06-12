@@ -36,6 +36,13 @@ PLUGGABLE_KEYS = [
     "AIRBYTE_REPORT_WEBHOOK_URL",
     "SLACK_WEBHOOK_URL",
     "SLACK_CHANNEL",
+    "DASHBOARD_WEBHOOK_URL",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USERNAME",
+    "SMTP_PASSWORD",
+    "SMTP_FROM_EMAIL",
+    "SUPPLIER_ALERT_EMAIL",
     "ACTIVE_MODEL",
 ]
 
@@ -43,6 +50,13 @@ RUNTIME_CONFIG: dict[str, str] = {}
 
 AUTO_EXECUTE_USD_LIMIT = float(os.getenv("AUTO_EXECUTE_USD_LIMIT", "100000"))
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+AUTO_PIPELINE_ENABLED = os.getenv("AUTO_PIPELINE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+AUTO_PIPELINE_RUN_ON_STARTUP = os.getenv("AUTO_PIPELINE_RUN_ON_STARTUP", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def get_key(name: str) -> str | None:
@@ -76,5 +90,7 @@ def integration_status() -> dict[str, bool | str]:
         "clickhouse": get_key("CLICKHOUSE_HOST") is not None,
         "airbyte": get_key("AIRBYTE_API_KEY") is not None or get_key("AIRBYTE_REPORT_WEBHOOK_URL") is not None,
         "slack": get_key("SLACK_WEBHOOK_URL") is not None,
+        "email": get_key("SMTP_HOST") is not None and get_key("SUPPLIER_ALERT_EMAIL") is not None,
+        "dashboard": get_key("DASHBOARD_WEBHOOK_URL") is not None,
         "active_model": get_active_model(),
     }
