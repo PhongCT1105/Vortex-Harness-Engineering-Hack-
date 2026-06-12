@@ -3,7 +3,7 @@ function withScheme(origin: string): string {
   return origin.includes("://") ? origin : `https://${origin}`;
 }
 
-const API_BASE = withScheme(process.env.NEXT_PUBLIC_API_BASE_URL ?? "/");
+const API_BASE = "";
 
 export type Weather = {
   affected_countries: string[];
