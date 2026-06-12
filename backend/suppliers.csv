@@ -1,0 +1,9 @@
+supplier_id,country,shipment_id,component,value_usd,criticality,backup_supplier_id
+S1,Germany,SH1,Steel chassis,150000,0.9,S6
+S2,Austria,SH2,Aluminum frame,80000,0.7,S5
+S3,Poland,SH3,Wiring harness,45000,0.5,S7
+S4,Spain,SH4,Glass panels,120000,0.85,S8
+S5,Netherlands,SH5,Hydraulic pumps,60000,0.6,S2
+S6,Sweden,SH6,Bearings,30000,0.4,S1
+S7,Germany,SH7,Control units,95000,0.75,S3
+S8,Poland,SH8,Tires,25000,0.3,S4
