@@ -13,7 +13,7 @@ services:
         fromService:
           type: web
           name: stormops-frontend
-          property: url
+          property: host
       - key: AUTO_EXECUTE_USD_LIMIT
         value: "100000"
       - key: ACTIVE_MODEL
@@ -85,4 +85,4 @@ services:
         fromService:
           type: web
           name: stormops-api
-          property: url
+          property: host

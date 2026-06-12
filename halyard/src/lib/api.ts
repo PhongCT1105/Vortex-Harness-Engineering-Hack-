@@ -1,4 +1,9 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// Render's fromService `host` property returns a bare hostname; add a scheme if missing.
+function withScheme(origin: string): string {
+  return origin.includes("://") ? origin : `https://${origin}`;
+}
+
+const API_BASE = withScheme(process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000");
 
 export type Weather = {
   affected_countries: string[];

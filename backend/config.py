@@ -48,8 +48,15 @@ PLUGGABLE_KEYS = [
 
 RUNTIME_CONFIG: dict[str, str] = {}
 
+def _with_scheme(origin: str) -> str:
+    """Render's fromService `host` property returns a bare hostname; add a scheme if missing."""
+    if "://" in origin:
+        return origin
+    return f"https://{origin}"
+
+
 AUTO_EXECUTE_USD_LIMIT = float(os.getenv("AUTO_EXECUTE_USD_LIMIT", "100000"))
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+FRONTEND_ORIGIN = _with_scheme(os.getenv("FRONTEND_ORIGIN", "http://localhost:3000"))
 AUTO_PIPELINE_ENABLED = os.getenv("AUTO_PIPELINE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 AUTO_PIPELINE_RUN_ON_STARTUP = os.getenv("AUTO_PIPELINE_RUN_ON_STARTUP", "false").lower() in {
     "1",
