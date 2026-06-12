@@ -1,0 +1,6 @@
+shipment_id,supplier_id,destination,status,eta_days,value_usd
+SH1,S1,Factory A,in_transit,2,120000
+SH2,S2,Factory A,pending_pickup,1,80000
+SH3,S3,Factory B,in_transit,3,150000
+SH4,S4,Factory A,scheduled,8,60000
+SH5,S6,Factory B,in_transit,4,95000

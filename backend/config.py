@@ -16,6 +16,7 @@ load_dotenv()
 PLUGGABLE_KEYS = [
     "JUA_API_KEY",
     "ANTHROPIC_API_KEY",
+    "DEEPSEEK_API_KEY",
     "CLICKHOUSE_HOST",
     "CLICKHOUSE_PORT",
     "CLICKHOUSE_USER",
@@ -24,6 +25,7 @@ PLUGGABLE_KEYS = [
     "AIRBYTE_API_KEY",
     "SLACK_WEBHOOK_URL",
     "SLACK_CHANNEL",
+    "ACTIVE_MODEL",
 ]
 
 RUNTIME_CONFIG: dict[str, str] = {}
@@ -48,11 +50,19 @@ def set_keys(updates: dict[str, str]) -> None:
             RUNTIME_CONFIG.pop(key, None)
 
 
-def integration_status() -> dict[str, bool]:
+def get_active_model() -> str:
+    """Which LLM provider drives the reasoning agents: 'claude' or 'deepseek'."""
+    model = get_key("ACTIVE_MODEL")
+    return model if model in ("claude", "deepseek") else "claude"
+
+
+def integration_status() -> dict[str, bool | str]:
     return {
         "jua": get_key("JUA_API_KEY") is not None,
         "anthropic": get_key("ANTHROPIC_API_KEY") is not None,
+        "deepseek": get_key("DEEPSEEK_API_KEY") is not None,
         "clickhouse": get_key("CLICKHOUSE_HOST") is not None,
         "airbyte": get_key("AIRBYTE_API_KEY") is not None,
         "slack": get_key("SLACK_WEBHOOK_URL") is not None,
+        "active_model": get_active_model(),
     }
