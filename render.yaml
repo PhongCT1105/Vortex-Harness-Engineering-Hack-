@@ -1,0 +1,88 @@
+services:
+  # --- Backend: FastAPI (StormOps API) ---
+  - type: web
+    name: stormops-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_ORIGIN
+        fromService:
+          type: web
+          name: stormops-frontend
+          property: url
+      - key: AUTO_EXECUTE_USD_LIMIT
+        value: "100000"
+      - key: ACTIVE_MODEL
+        value: claude
+      - key: AUTO_PIPELINE_ENABLED
+        value: "true"
+      - key: AUTO_PIPELINE_RUN_ON_STARTUP
+        value: "false"
+      - key: SUPPLY_CHAIN_WEATHER_REFRESH_HOURS
+        value: "4"
+      # --- Secrets / optional integrations: set values in the Render dashboard ---
+      - key: JUA_API_KEY
+        sync: false
+      - key: JUA_FORECAST_URL
+        sync: false
+      - key: WEATHERAPI_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-5
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: CLICKHOUSE_HOST
+        sync: false
+      - key: CLICKHOUSE_PORT
+        value: "8443"
+      - key: CLICKHOUSE_USER
+        sync: false
+      - key: CLICKHOUSE_PASSWORD
+        sync: false
+      - key: CLICKHOUSE_DATABASE
+        value: default
+      - key: AIRBYTE_API_KEY
+        sync: false
+      - key: AIRBYTE_REPORT_WEBHOOK_URL
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SLACK_CHANNEL
+        value: "slack#procurement"
+      - key: DASHBOARD_WEBHOOK_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SUPPLIER_ALERT_EMAIL
+        sync: false
+
+  # --- Frontend: Next.js console (Halyard) ---
+  - type: web
+    name: stormops-frontend
+    runtime: node
+    rootDir: halyard
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start -- -p $PORT
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          type: web
+          name: stormops-api
+          property: url
