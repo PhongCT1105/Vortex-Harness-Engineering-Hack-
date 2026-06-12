@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-DATA = Path(__file__).resolve().parent.parent / "data"
+DATA = Path(__file__).resolve().parent
 
 # High-risk actions (e.g. expensive reroutes) escalate to a human; everything
 # else auto-executes. This tiered policy is what makes "autonomous on real-time

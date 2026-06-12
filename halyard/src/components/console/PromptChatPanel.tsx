@@ -6,9 +6,12 @@ import { motion } from "motion/react";
 import {
   ArrowRight,
   ChatCircleText,
+  CheckCircle,
   Factory,
   GitBranch,
+  Lightning,
   PaperPlaneTilt,
+  ShieldWarning,
   WarningDiamond,
 } from "@phosphor-icons/react/dist/ssr";
 import { AgentEventRow, Incident, IncidentChatResponse, askIncident } from "@/lib/api";
@@ -190,21 +193,61 @@ function SupplyChainSimulation({
   const topShipments = incident.impact.shipments.slice(0, 3);
   const approvalCount = incident.pending_approval.length;
   const autoCount = incident.auto_executed.length;
+  const totalValueAtRisk = incident.impact.shipments.reduce((sum, s) => sum + s.value_usd, 0);
+  const severityPct = Math.round(Math.min(1, incident.weather.severity) * 100);
+  const confidencePct = Math.round((incident.orchestration?.confidence ?? 0) * 100);
+  const priorityOrder = incident.orchestration?.priority_order ?? [];
+  const damagedNodes = incident.orchestration?.damaged_nodes ?? [];
 
   return (
-    <aside className="rounded-2xl border border-border bg-surface p-5">
-      <p className="text-xs font-medium uppercase tracking-wider text-accent">
-        OpenUI incident visualization
-      </p>
-      <h2 className="mt-1 text-lg font-semibold">Supply-chain damage map</h2>
+    <aside className="relative overflow-hidden rounded-2xl border border-border bg-surface p-5">
+      <div className="pointer-events-none absolute -right-24 -top-24 h-56 w-56 rounded-full bg-red-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-20 -left-20 h-48 w-48 rounded-full bg-accent/10 blur-3xl" />
 
-      <div className="mt-5 space-y-3">
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-accent">
+            OpenUI incident visualization
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">Supply-chain damage map</h2>
+        </div>
+        {incident.orchestration && (
+          <span className="shrink-0 rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-[11px] font-medium text-accent">
+            {incident.orchestration.source} · {confidencePct}% confidence
+          </span>
+        )}
+      </div>
+
+      <div className="relative mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Severity" value={`${severityPct}%`} tone="danger" />
+        <StatTile label="Shipments at risk" value={incident.impact.at_risk_shipments} tone="warning" />
+        <StatTile label="Value exposed" value={_money(totalValueAtRisk)} tone="warning" />
+        <StatTile label="Audit events" value={auditCount} tone="recovering" />
+      </div>
+
+      <div className="relative mt-3 rounded-xl border border-red-500/20 bg-red-500/[0.06] p-3">
+        <div className="flex items-center justify-between text-[11px] text-text-muted">
+          <span className="font-medium uppercase tracking-wide text-red-300">Storm severity</span>
+          <span>{severityPct}%</span>
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-bg/60">
+          <motion.div
+            className="h-full rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-red-500"
+            initial={{ width: 0 }}
+            animate={{ width: `${severityPct}%` }}
+            transition={{ duration: 1, ease: "easeOut" }}
+          />
+        </div>
+      </div>
+
+      <div className="relative mt-5 space-y-3">
         <ChainNode
           icon={<WarningDiamond size={18} weight="bold" />}
           title="Weather zone"
           detail={incident.weather.affected_countries.join(", ")}
-          status={`${incident.weather.risk_level} · ${incident.weather.wind_kmh} km/h wind`}
+          status={`${incident.weather.risk_level} · ${incident.weather.wind_kmh} km/h wind · ${incident.weather.precipitation_mm} mm rain`}
           tone="danger"
+          pulse
         />
         <Connector damaged />
         <ChainNode
@@ -213,6 +256,7 @@ function SupplyChainSimulation({
           detail={`${incident.impact.at_risk_shipments} shipments exposed`}
           status={topShipments.map((s) => s.component).join(", ") || "No damaged lane"}
           tone="warning"
+          pulse
         />
         <Connector damaged={approvalCount > 0} />
         <ChainNode
@@ -224,7 +268,29 @@ function SupplyChainSimulation({
         />
       </div>
 
-      <div className="mt-5 rounded-xl border border-border bg-bg/45 p-3">
+      {damagedNodes.length > 0 && (
+        <div className="relative mt-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
+            Damage assessment
+          </p>
+          <ul className="mt-2 space-y-2">
+            {damagedNodes.map((node) => (
+              <li
+                key={node.node}
+                className="flex items-start gap-2 rounded-lg border border-border bg-bg/45 px-3 py-2 text-sm"
+              >
+                <SeverityBadge severity={node.severity} />
+                <span className="min-w-0">
+                  <span className="block font-medium">{node.node}</span>
+                  <span className="text-xs text-text-muted">{node.reason}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="relative mt-5 rounded-xl border border-border bg-bg/45 p-3">
         <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
           Damaged components
         </p>
@@ -235,22 +301,130 @@ function SupplyChainSimulation({
           {topShipments.map((shipment) => (
             <li
               key={shipment.shipment_id}
-              className="flex items-center justify-between gap-3 rounded-lg bg-surface-2 px-3 py-2 text-sm"
+              className="rounded-lg bg-surface-2 px-3 py-2 text-sm"
             >
-              <span className="min-w-0">
-                <span className="block truncate font-medium">{shipment.component}</span>
-                <span className="text-xs text-text-muted">
-                  {shipment.country} · {shipment.shipment_id}
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{shipment.component}</span>
+                  <span className="text-xs text-text-muted">
+                    {shipment.country} · {shipment.shipment_id} · {_money(shipment.value_usd)}
+                  </span>
                 </span>
-              </span>
-              <span className="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300">
-                {shipment.risk_score.toFixed(2)}
-              </span>
+                <span className="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300">
+                  {shipment.risk_score.toFixed(2)}
+                </span>
+              </div>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-bg/60">
+                <motion.div
+                  className="h-full rounded-full bg-gradient-to-r from-amber-400 to-red-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.round(Math.min(1, shipment.risk_score) * 100)}%` }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                />
+              </div>
             </li>
           ))}
         </ul>
       </div>
+
+      {(incident.auto_executed.length > 0 || incident.pending_approval.length > 0) && (
+        <div className="relative mt-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
+            Recovery plan
+          </p>
+          <ul className="mt-2 space-y-2">
+            {incident.auto_executed.map((action) => (
+              <li
+                key={action.id}
+                className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-sm"
+              >
+                <CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-emerald-400" />
+                <span className="min-w-0">
+                  <span className="block font-medium text-emerald-200">{action.action}</span>
+                  <span className="text-xs text-text-muted">
+                    {action.shipment_id} · {_money(action.value_usd)} · risk {action.risk_score.toFixed(2)} · auto-executed
+                  </span>
+                </span>
+              </li>
+            ))}
+            {incident.pending_approval.map((action) => (
+              <li
+                key={action.id}
+                className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-sm"
+              >
+                <ShieldWarning size={16} weight="fill" className="mt-0.5 shrink-0 text-amber-400" />
+                <span className="min-w-0">
+                  <span className="block font-medium text-amber-200">{action.action}</span>
+                  <span className="text-xs text-text-muted">
+                    {action.shipment_id} · {_money(action.value_usd)} · risk {action.risk_score.toFixed(2)} · awaiting approval
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {priorityOrder.length > 0 && (
+        <div className="relative mt-5 rounded-xl border border-accent/20 bg-accent-soft p-3">
+          <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-accent">
+            <Lightning size={14} weight="fill" />
+            Priority order
+          </p>
+          <ol className="mt-2 space-y-1 text-sm">
+            {priorityOrder.map((item, index) => (
+              <li key={item} className="flex items-center gap-2">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/20 text-[11px] font-semibold text-accent">
+                  {index + 1}
+                </span>
+                <span className="truncate">{item}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </aside>
+  );
+}
+
+function _money(value: number): string {
+  return `$${Math.round(value).toLocaleString()}`;
+}
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone: "danger" | "warning" | "recovering";
+}) {
+  const toneClass = {
+    danger: "border-red-500/25 bg-red-500/[0.07] text-red-200",
+    warning: "border-amber-500/25 bg-amber-500/[0.07] text-amber-200",
+    recovering: "border-accent/25 bg-accent-soft text-accent",
+  }[tone];
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-text">{value}</p>
+    </div>
+  );
+}
+
+function SeverityBadge({ severity }: { severity: "watch" | "elevated" | "critical" }) {
+  const toneClass = {
+    watch: "bg-accent/20 text-accent",
+    elevated: "bg-amber-500/20 text-amber-300",
+    critical: "bg-red-500/20 text-red-300",
+  }[severity];
+
+  return (
+    <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${toneClass}`}>
+      {severity}
+    </span>
   );
 }
 
@@ -260,12 +434,14 @@ function ChainNode({
   detail,
   status,
   tone,
+  pulse,
 }: {
   icon: ReactNode;
   title: string;
   detail: string;
   status: string;
   tone: "danger" | "warning" | "recovering";
+  pulse?: boolean;
 }) {
   const toneClass = {
     danger: "border-red-500/30 bg-red-500/[0.08] text-red-200",
@@ -273,8 +449,23 @@ function ChainNode({
     recovering: "border-accent/30 bg-accent-soft text-accent",
   }[tone];
 
+  const glowClass = {
+    danger: "shadow-[0_0_24px_rgba(248,113,113,0.18)]",
+    warning: "shadow-[0_0_24px_rgba(251,191,36,0.16)]",
+    recovering: "shadow-[0_0_24px_rgba(91,141,239,0.16)]",
+  }[tone];
+
   return (
-    <div className={`rounded-xl border p-3 ${toneClass}`}>
+    <motion.div
+      className={`relative rounded-xl border p-3 ${toneClass} ${glowClass}`}
+      whileHover={{ scale: 1.01 }}
+    >
+      {pulse && (
+        <span className="absolute -right-1 -top-1 flex h-3 w-3">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-60" />
+          <span className="relative inline-flex h-3 w-3 rounded-full bg-red-400" />
+        </span>
+      )}
       <div className="flex items-start gap-3">
         <span className="mt-0.5">{icon}</span>
         <div className="min-w-0">
@@ -283,7 +474,7 @@ function ChainNode({
           <p className="mt-1 truncate text-xs text-text-muted">{status}</p>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

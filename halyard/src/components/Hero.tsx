@@ -27,7 +27,10 @@ export function Hero() {
             transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
             className="max-w-[42ch] text-lg leading-relaxed text-text-muted"
           >
-            StormOps watches live weather data, reasons about supplier exposure, and drafts the alert before anyone asks.
+            StormOps watches live weather data, maps it against your supply chain, and
+            uses Claude to reason about supplier exposure — auto-executing low-risk
+            fixes, routing the rest to Slack for approval, and logging every step to
+            ClickHouse.
           </motion.p>
           <motion.div
             {...rise}

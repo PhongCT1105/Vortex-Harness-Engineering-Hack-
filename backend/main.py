@@ -2,18 +2,25 @@
 docs/API_CONTRACT.md §5 for the pipeline and endpoint shapes.
 """
 
+import hashlib
+import hmac
+import json
+import time
 import uuid
 import asyncio
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+import httpx
 
 from clickhouse_log import log_event, read_events
 from automation import run_real_weather_pipeline
 from clickhouse_store import ensure_schema, is_available as clickhouse_is_available, reset_schema
 from comms import action_required_alert, comms_agent
-from config import AUTO_PIPELINE_ENABLED, AUTO_PIPELINE_RUN_ON_STARTUP, FRONTEND_ORIGIN, integration_status, set_keys
+from config import AUTO_PIPELINE_ENABLED, AUTO_PIPELINE_RUN_ON_STARTUP, FRONTEND_ORIGIN, get_key, integration_status, set_keys
 from ai_agent import orchestration_agent
 from impact import impact_agent
 from mitigation import mitigation_agent
@@ -171,6 +178,8 @@ class ConfigRequest(BaseModel):
     AIRBYTE_REPORT_WEBHOOK_URL: str | None = None
     SLACK_WEBHOOK_URL: str | None = None
     SLACK_CHANNEL: str | None = None
+    SLACK_SIGNING_SECRET: str | None = None
+    BACKEND_PUBLIC_URL: str | None = None
     DASHBOARD_WEBHOOK_URL: str | None = None
     SMTP_HOST: str | None = None
     SMTP_PORT: str | None = None
@@ -178,6 +187,11 @@ class ConfigRequest(BaseModel):
     SMTP_PASSWORD: str | None = None
     SMTP_FROM_EMAIL: str | None = None
     SUPPLIER_ALERT_EMAIL: str | None = None
+
+
+@app.get("/")
+def root():
+    return {"status": "StormOps API running"}
 
 
 @app.get("/health")
@@ -234,6 +248,81 @@ def approve(req: ApproveRequest):
     executed = {**action, "status": "approved", **result}
     log_event("action_executed", executed, action.get("incident_id"))
     return result
+
+
+def _verify_slack_signature(body: bytes, headers) -> bool:
+    secret = get_key("SLACK_SIGNING_SECRET")
+    if not secret:
+        # No signing secret configured — accept (mock/dev mode).
+        return True
+
+    timestamp = headers.get("x-slack-request-timestamp", "")
+    signature = headers.get("x-slack-signature", "")
+    if not timestamp or not signature:
+        return False
+    if abs(time.time() - float(timestamp)) > 60 * 5:
+        return False
+
+    basestring = f"v0:{timestamp}:{body.decode()}".encode()
+    digest = hmac.new(secret.encode(), basestring, hashlib.sha256).hexdigest()
+    expected = f"v0={digest}"
+    return hmac.compare_digest(expected, signature)
+
+
+@app.post("/slack/interactions")
+async def slack_interactions(request: Request):
+    """Handles button clicks from Slack messages (e.g. the "Approve" action)."""
+    raw_body = await request.body()
+    if not _verify_slack_signature(raw_body, request.headers):
+        return JSONResponse({"error": "invalid signature"}, status_code=401)
+
+    form = await request.form()
+    payload = json.loads(form.get("payload", "{}"))
+
+    if payload.get("type") != "block_actions":
+        return JSONResponse({"ok": True})
+
+    for click in payload.get("actions", []):
+        if click.get("action_id") != "approve_action":
+            continue
+
+        try:
+            value = json.loads(click.get("value", "{}"))
+        except json.JSONDecodeError:
+            continue
+
+        action = value.get("action")
+        incident_id = value.get("incident_id")
+        if not action:
+            continue
+
+        result = comms_agent({**action, "status": "approved"})
+        executed = {**action, "status": "approved", **result}
+        log_event("action_executed", executed, incident_id)
+        log_event(
+            "approval_clicked_in_slack",
+            {"action_id": action.get("id"), "user": payload.get("user", {}).get("username")},
+            incident_id,
+        )
+
+        response_url = payload.get("response_url")
+        if response_url:
+            try:
+                httpx.post(
+                    response_url,
+                    json={
+                        "replace_original": True,
+                        "text": (
+                            f"✅ Approved by <@{payload.get('user', {}).get('id', 'someone')}> — "
+                            f"{action['action']} (shipment {action['shipment_id']})"
+                        ),
+                    },
+                    timeout=10,
+                )
+            except Exception:
+                pass
+
+    return JSONResponse({"ok": True})
 
 
 @app.post("/chat")

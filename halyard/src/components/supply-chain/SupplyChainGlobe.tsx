@@ -84,7 +84,7 @@ export function SupplyChainGlobe({
       lng: node.lng,
       size: 0.55 + node.criticality * 0.6,
       color: ACCENT_GLOW,
-      label: `${node.component} — ${node.country}`,
+      label: `${node.component} · ${node.country}`,
       kind: "supplier",
       node,
     }));
@@ -93,11 +93,19 @@ export function SupplyChainGlobe({
       lng: data.assembly.lng,
       size: 1.4,
       color: ASSEMBLY_COLOR,
-      label: `${data.assembly.name} — ${data.assembly.city}, ${data.assembly.country}`,
+      label: `${data.assembly.name} · ${data.assembly.city}, ${data.assembly.country}`,
       kind: "assembly",
     };
     return [...supplierPoints, assemblyPoint];
   }, [data]);
+
+  // Only label the assembly plant on the globe itself — supplier names show up
+  // as hover tooltips (pointLabel) instead, since rendering a label for every
+  // supplier crowds the globe with overlapping, low-res text.
+  const labelsData = useMemo(
+    () => pointsData.filter((point) => point.kind === "assembly"),
+    [pointsData]
+  );
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
@@ -128,15 +136,16 @@ export function SupplyChainGlobe({
           const p = point as PointDatum;
           onSelectNode?.(p.node ?? null);
         }}
-        labelsData={pointsData}
+        labelsData={labelsData}
         labelLat="lat"
         labelLng="lng"
         labelText={(d: object) => (d as PointDatum).label}
-        labelSize={(d: object) => ((d as PointDatum).kind === "assembly" ? 0.85 : 0.55)}
-        labelColor={(d: object) => ((d as PointDatum).kind === "assembly" ? ASSEMBLY_COLOR : "rgba(255,255,255,0.75)")}
+        labelSize={0.9}
+        labelColor={() => ASSEMBLY_COLOR}
         labelDotRadius={0}
-        labelAltitude={0.012}
-        labelResolution={2}
+        labelAltitude={0.014}
+        labelResolution={6}
+        labelIncludeDot={false}
       />
     </div>
   );

@@ -15,6 +15,7 @@ Every dispatch is best-effort and never raises — failures are reported via
 records what was attempted.
 """
 
+import json
 import smtplib
 from email.message import EmailMessage
 
@@ -48,14 +49,14 @@ def _format_body(action: dict) -> str:
     )
 
 
-def _action_blocks(action: dict, status: str) -> list[dict]:
+def _action_blocks(action: dict, status: str, incident_id: str | None = None) -> list[dict]:
     emoji, _ = _style("critical" if action.get("risk_score", 0) >= 0.7 else "watch")
     status_label = {
         "auto_executed": "Auto-executed",
         "pending_approval": "Needs approval",
         "approved": "Approved & executed",
     }.get(status, status)
-    return [
+    blocks: list[dict] = [
         {
             "type": "section",
             "text": {
@@ -68,6 +69,28 @@ def _action_blocks(action: dict, status: str) -> list[dict]:
             },
         }
     ]
+
+    if status == "pending_approval":
+        # Embed the action (+ incident id) in the button value so the Slack
+        # interaction handler can approve it without the operator opening the dashboard.
+        value = json.dumps({"incident_id": incident_id, "action": action})[:2000]
+        blocks.append(
+            {
+                "type": "actions",
+                "block_id": f"approve_{action.get('id', '')}",
+                "elements": [
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "text": {"type": "plain_text", "text": "✅ Approve"},
+                        "action_id": "approve_action",
+                        "value": value,
+                    }
+                ],
+            }
+        )
+
+    return blocks
 
 
 def _post_slack(blocks: list[dict], fallback_text: str) -> dict:
@@ -112,7 +135,7 @@ def action_required_alert(actions: list[dict], incident_id: str | None = None) -
         {"type": "divider"},
     ]
     for action in actions:
-        blocks.extend(_action_blocks(action, "pending_approval"))
+        blocks.extend(_action_blocks(action, "pending_approval", incident_id))
 
     total = sum(a["value_usd"] for a in actions)
     fallback = f"[StormOps] {len(actions)} action(s) need approval, total ${total:,}."

@@ -2,6 +2,7 @@ import { Nav } from "@/components/Nav";
 import { Hero } from "@/components/Hero";
 import { IntegrationStrip } from "@/components/IntegrationStrip";
 import { HowItWorks } from "@/components/HowItWorks";
+import { GlobePreview } from "@/components/GlobePreview";
 import { LiveAuditLog } from "@/components/LiveAuditLog";
 import { Capabilities } from "@/components/Capabilities";
 import { Quote } from "@/components/Quote";
@@ -16,6 +17,7 @@ export default function Home() {
         <Hero />
         <IntegrationStrip />
         <HowItWorks />
+        <GlobePreview />
         <LiveAuditLog />
         <Capabilities />
         <Quote />

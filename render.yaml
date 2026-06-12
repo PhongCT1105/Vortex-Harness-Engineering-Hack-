@@ -57,6 +57,13 @@ services:
         sync: false
       - key: SLACK_CHANNEL
         value: "slack#procurement"
+      - key: SLACK_SIGNING_SECRET
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        fromService:
+          type: web
+          name: stormops-api
+          property: host
       - key: DASHBOARD_WEBHOOK_URL
         sync: false
       - key: SMTP_HOST

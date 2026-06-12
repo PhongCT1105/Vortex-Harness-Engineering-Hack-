@@ -12,10 +12,10 @@ export function CTA() {
             Get StormOps running on your supplier map in an afternoon, with full approval controls from day one.
           </p>
           <a
-            href="#"
+            href="/console"
             className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-medium text-white transition-transform active:scale-[0.98] hover:bg-accent/90"
           >
-            Get access
+            Open mission control
             <ArrowRight size={16} weight="bold" />
           </a>
         </div>
