@@ -88,6 +88,7 @@ def answer_incident_question(incident: dict, question: str, events: list[dict]) 
     auto = incident.get("auto_executed", [])
     pending = incident.get("pending_approval", [])
     incident_events = [event for event in events if event.get("incident_id") == incident["incident_id"]]
+    orchestration = incident.get("orchestration") or {}
     mode = _match_question(question)
 
     top = shipments[0] if shipments else None
@@ -126,16 +127,19 @@ def answer_incident_question(incident: dict, question: str, events: list[dict]) 
         )
     else:
         answer = (
-            f"Incident {incident['incident_id']} is a {weather['risk_level']} weather disruption "
-            f"affecting {impact['affected_suppliers']} suppliers and "
-            f"{impact['at_risk_shipments']} shipments. "
-            f"The prompt window highlights the damaged supplier lane and the parts requiring action."
+            orchestration.get("executive_summary")
+            or (
+                f"Incident {incident['incident_id']} is a {weather['risk_level']} weather disruption "
+                f"affecting {impact['affected_suppliers']} suppliers and "
+                f"{impact['at_risk_shipments']} shipments. "
+                f"The prompt window highlights the damaged supplier lane and the parts requiring action."
+            )
         )
 
     return {
         "answer": answer,
         "openui_lang": build_openui_lang(incident, question, len(incident_events)),
-        "suggested_questions": [
+        "suggested_questions": orchestration.get("operator_questions") or [
             "Which part of the supply chain is damaged?",
             "Why did Jua classify this as high risk?",
             "Which mitigations need approval?",

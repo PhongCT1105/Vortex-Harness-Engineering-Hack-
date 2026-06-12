@@ -7,6 +7,12 @@ over a supplier/shipment graph to score disruption risk, **auto-executes low-ris
 mitigations**, **escalates high-risk ones to a human**, and fires the approved actions as
 real Slack/email — every step logged. Built for the Harness Engineering Hack.
 
+It also maintains a cached supply-chain weather monitor: `GET /supply-chain/weather`
+uses Open-Meteo, optional WeatherAPI, wttr.in, and free search context for country
+and route-level disruption snippets, refreshing every 4 hours by default. Uploaded
+supply-chain CSVs become the active graph Claude can inspect through route-weather
+tools.
+
 One-liner: *StormOps turns real-time extreme-weather signals into governed, human-approved
 supply-chain mitigation actions across procurement, logistics, and factory ops.*
 
@@ -37,6 +43,13 @@ NL/trigger event
 cd backend && pip install -r requirements.txt
 python main.py            # no-server smoke test, prints a full incident
 uvicorn main:app --reload # API: POST /run {"event": "..."}, POST /approve, GET /events
+```
+
+Supply-chain weather:
+```bash
+curl "http://localhost:8000/supply-chain/weather"
+curl "http://localhost:8000/supply-chain/weather?force_refresh=true"
+curl "http://localhost:8000/supply-chain/weather/routes?supplier_id=S1"
 ```
 
 ---

@@ -86,7 +86,10 @@ export function PromptChatPanel({
     );
   }
 
-  const suggested = lastResponse?.suggested_questions ?? DEFAULT_QUESTIONS;
+  const suggested =
+    lastResponse?.suggested_questions ??
+    incident.orchestration?.operator_questions ??
+    DEFAULT_QUESTIONS;
 
   return (
     <section className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
@@ -108,6 +111,11 @@ export function PromptChatPanel({
             <div className="rounded-xl border border-border bg-surface/80 p-4 text-sm text-text-muted">
               Ask a follow-up like “which component is damaged?” The answer is grounded
               in the incident payload and the ClickHouse/audit timeline.
+              {incident.orchestration?.executive_summary && (
+                <p className="mt-2 text-text">
+                  {incident.orchestration.executive_summary}
+                </p>
+              )}
             </div>
           )}
           {messages.map((message, index) => (

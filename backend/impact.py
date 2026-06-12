@@ -1,28 +1,25 @@
 """Impact Agent — see docs/API_CONTRACT.md §4.
 
-Consumes Weather Agent output and ranks at-risk shipments using suppliers.csv.
+Consumes Weather Agent output and ranks at-risk shipments using the active
+supply-chain graph. Uploaded CSVs become the active graph in supply_chain.py.
 """
 
-from pathlib import Path
-
-import pandas as pd
-
-SUPPLIERS_CSV = Path(__file__).parent / "suppliers.csv"
+from supply_chain import DEFAULT_PRODUCT, default_supply_chain
 
 
-def impact_agent(weather: dict) -> dict:
-    suppliers = pd.read_csv(SUPPLIERS_CSV)
-    affected = suppliers[suppliers["country"].isin(weather["affected_countries"])]
+def impact_agent(weather: dict, product: str = DEFAULT_PRODUCT) -> dict:
+    chain = default_supply_chain(product)
+    affected = [node for node in chain["nodes"] if node["country"] in weather["affected_countries"]]
 
     severity = weather["severity"]
     shipments = []
-    for _, row in affected.iterrows():
+    for index, row in enumerate(affected, start=1):
         risk_score = round(min(1.0, severity * row["criticality"] + 0.1), 2)
         shipments.append(
             {
-                "shipment_id": row["shipment_id"],
-                "supplier_id": row["supplier_id"],
-                "backup_supplier_id": row["backup_supplier_id"],
+                "shipment_id": row.get("shipment_id") or f"SH{index}",
+                "supplier_id": row["id"],
+                "backup_supplier_id": row.get("backup_supplier_id") or f"B{index}",
                 "country": row["country"],
                 "component": row["component"],
                 "value_usd": int(row["value_usd"]),
@@ -34,7 +31,7 @@ def impact_agent(weather: dict) -> dict:
     shipments.sort(key=lambda s: s["risk_score"], reverse=True)
 
     return {
-        "affected_suppliers": affected["supplier_id"].nunique(),
+        "affected_suppliers": len({row["id"] for row in affected}),
         "at_risk_shipments": len(shipments),
         "shipments": shipments,
     }

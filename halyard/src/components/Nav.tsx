@@ -28,12 +28,20 @@ export function Nav() {
           ))}
         </nav>
 
-        <Link
-          href="/console"
-          className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-transform active:scale-[0.98] hover:bg-accent/90"
-        >
-          Open console
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/supply-chain"
+            className="hidden text-sm text-text-muted transition-colors hover:text-text sm:inline"
+          >
+            Supply chain map
+          </Link>
+          <Link
+            href="/console"
+            className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-transform active:scale-[0.98] hover:bg-accent/90"
+          >
+            Open console
+          </Link>
+        </div>
       </div>
     </header>
   );

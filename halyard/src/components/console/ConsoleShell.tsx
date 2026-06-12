@@ -4,6 +4,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CloudLightning,
+  CloudSun,
   SquaresFour,
   Cube,
   Robot,
@@ -16,6 +17,7 @@ import {
 
 export const TABS = [
   { key: "overview", label: "Overview", icon: SquaresFour },
+  { key: "supply-weather", label: "Supply weather", icon: CloudSun },
   { key: "pipeline", label: "Pipeline", icon: Cube },
   { key: "reasoning", label: "Agent reasoning", icon: Robot },
   { key: "ask", label: "Ask incident", icon: ChatCircleText },

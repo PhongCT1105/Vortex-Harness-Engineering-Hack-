@@ -126,13 +126,76 @@ No action needed from A/B. Documented here so you know what feeds your module:
 - `POST /approve` `{"action": <one pending_approval dict>}` -> comms result (§3),
   also appends an `action_executed` event.
 - `GET /events` -> list of `{ts, kind, payload}` (in-memory `EVENTS`).
+- `GET /supply-chain/weather` -> cached weather intelligence for every country and
+  supplier-to-assembly route in the active supplier graph. Uploaded CSVs become
+  the active graph in memory. Query params:
+  - `product`: optional product label. If omitted, uses the latest uploaded product
+    or `Electric Vehicle`.
+  - `force_refresh=true`: bypasses the 4-hour cache and pulls fresh provider data.
+- `GET /supply-chain/weather/routes` -> route-only weather. Query params:
+  - `product`: optional product label.
+  - `supplier_id`: optional supplier lane filter, e.g. `S1`.
+
+### Supply-chain weather output
+```json
+{
+  "product": "Electric Vehicle",
+  "generated_at": "2026-06-12T18:00:00+00:00",
+  "expires_at": "2026-06-12T22:00:00+00:00",
+  "refresh_seconds": 14400,
+  "source": "open-meteo+weatherapi+wttr+duckduckgo",
+  "worst_risk_level": "normal",
+  "max_severity": 0.07,
+  "countries": [
+    {
+      "country": "Germany",
+      "supplier_count": 2,
+      "components": ["Battery cells"],
+      "value_usd": 200000,
+      "avg_criticality": 0.9,
+      "wind_kmh": 12.1,
+      "precipitation_mm": 0.0,
+      "temperature_c": 21.3,
+      "severity": 0.07,
+      "risk_level": "normal",
+      "provider_readings": [{ "source": "open-meteo", "wind_kmh": 12.1 }],
+      "context": "Germany is at normal supply-chain weather risk...",
+      "search": {
+        "source": "rules",
+        "query": "",
+        "summary": "Current numeric weather is normal; no live disruption search was needed.",
+        "results": []
+      }
+    }
+  ],
+  "routes": [
+    {
+      "supplier_id": "S1",
+      "component": "Steel chassis",
+      "country": "Germany",
+      "destination": { "city": "Wolfsburg", "country": "Germany" },
+      "max_severity": 0.07,
+      "worst_risk_level": "normal",
+      "worst_point": "Steel chassis origin - Germany",
+      "context": "Steel chassis from Germany to Wolfsburg has normal route weather risk..."
+    }
+  ]
+}
+```
+
+Claude orchestration receives two internal weather tools:
+- `get_supply_chain_weather_intelligence`: full country + route monitor, cached for
+  4 hours unless `force_refresh` is true.
+- `lookup_route_weather`: route-only lookup for all lanes or one `supplier_id`.
 
 ## Env vars (no coordination needed — each person owns theirs)
 | Var | Owner | Purpose |
 |---|---|---|
 | `JUA_API_KEY` | A | real weather |
+| `WEATHERAPI_KEY` | C | optional free-tier backup weather provider |
 | `CLICKHOUSE_*` (host/user/password/db) | A | event log sink |
 | `AIRBYTE_*` / `SLACK_*` | B | Slack send via Airbyte |
 | `ANTHROPIC_API_KEY` | C (optional) | Claude-based weather parsing fallback |
+| `SUPPLY_CHAIN_WEATHER_REFRESH_HOURS` | C | Supply-chain weather cache cadence; default `4` |
 
 All keys optional — missing key = mock path = pipeline still runs end-to-end.

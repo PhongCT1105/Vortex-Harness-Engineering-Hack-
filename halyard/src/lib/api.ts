@@ -7,7 +7,8 @@ export type Weather = {
   temperature_c: number;
   severity: number;
   risk_level: "moderate" | "high" | "severe";
-  source: "jua" | "claude" | "mock";
+  source: "jua" | "jua+event" | "open-meteo" | "open-meteo+event" | "rules";
+  confidence?: number;
 };
 
 export type Shipment = {
@@ -42,8 +43,23 @@ export type Action = {
 
 export type Incident = {
   incident_id: string;
+  product?: string;
   weather: Weather;
   impact: Impact;
+  orchestration?: {
+    source: "claude" | "deepseek" | "rules";
+    executive_summary: string;
+    damaged_nodes: Array<{
+      node: string;
+      reason: string;
+      severity: "watch" | "elevated" | "critical";
+    }>;
+    priority_order: string[];
+    operator_questions: string[];
+    route_weather_findings?: string[];
+    tool_calls?: unknown[];
+    confidence: number;
+  };
   auto_executed: Action[];
   pending_approval: Action[];
 };
@@ -57,6 +73,7 @@ export type AgentEventRow = {
 
 export type IntegrationStatus = {
   jua: boolean;
+  weatherapi?: boolean;
   anthropic: boolean;
   deepseek: boolean;
   clickhouse: boolean;
@@ -73,8 +90,12 @@ export type IncidentChatResponse = {
 
 export type ConfigKeys = {
   JUA_API_KEY?: string;
+  JUA_FORECAST_URL?: string;
+  WEATHERAPI_KEY?: string;
   ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
   DEEPSEEK_API_KEY?: string;
+  DEEPSEEK_MODEL?: string;
   ACTIVE_MODEL?: string;
   CLICKHOUSE_HOST?: string;
   CLICKHOUSE_PORT?: string;
@@ -131,4 +152,149 @@ export function setConfig(keys: ConfigKeys): Promise<IntegrationStatus> {
     method: "POST",
     body: JSON.stringify(keys),
   });
+}
+
+export type SupplyChainNode = {
+  id: string;
+  shipment_id?: string;
+  backup_supplier_id?: string;
+  name: string;
+  country: string;
+  lat: number;
+  lng: number;
+  component: string;
+  value_usd: number;
+  criticality: number;
+};
+
+export type SupplyChainArc = {
+  id: string;
+  supplier_id: string;
+  component: string;
+  country: string;
+  value_usd: number;
+  criticality: number;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+};
+
+export type AssemblyPlant = {
+  name: string;
+  city: string;
+  country: string;
+  lat: number;
+  lng: number;
+};
+
+export type SupplyChain = {
+  product: string;
+  assembly: AssemblyPlant;
+  nodes: SupplyChainNode[];
+  arcs: SupplyChainArc[];
+  unresolved_countries: string[];
+  total_value_usd: number;
+};
+
+export type SupplyChainWeatherCountry = {
+  country: string;
+  lat: number;
+  lng: number;
+  supplier_count: number;
+  components: string[];
+  value_usd: number;
+  avg_criticality: number;
+  wind_kmh: number;
+  precipitation_mm: number;
+  temperature_c: number;
+  weather_code: number | null;
+  severity: number;
+  risk_level: "normal" | "watch" | "high" | "severe";
+  source: string;
+  condition?: string;
+  provider_readings?: Array<{
+    source: string;
+    wind_kmh: number;
+    precipitation_mm: number;
+    temperature_c: number;
+    condition: string;
+  }>;
+  context: string;
+  search: {
+    source: "duckduckgo" | "rules";
+    query: string;
+    summary: string;
+    results: Array<{
+      title: string;
+      url: string;
+      snippet: string;
+    }>;
+  };
+};
+
+export type SupplyChainWeather = {
+  product: string;
+  assembly: AssemblyPlant;
+  generated_at: string;
+  expires_at: string;
+  refresh_seconds: number;
+  source: string;
+  worst_risk_level: "normal" | "watch" | "high" | "severe";
+  max_severity: number;
+  countries: SupplyChainWeatherCountry[];
+  routes: Array<{
+    supplier_id: string;
+    component: string;
+    country: string;
+    value_usd: number;
+    criticality: number;
+    destination: {
+      name: string;
+      city: string;
+      country: string;
+    };
+    points: Array<{
+      kind: "origin" | "route_midpoint" | "assembly";
+      label: string;
+      search_name: string;
+      lat: number;
+      lng: number;
+      weather: SupplyChainWeatherCountry;
+    }>;
+    max_severity: number;
+    worst_risk_level: "normal" | "watch" | "high" | "severe";
+    worst_point: string;
+    context: string;
+  }>;
+};
+
+export function getSupplyChain(product?: string): Promise<SupplyChain> {
+  const qs = product ? `?product=${encodeURIComponent(product)}` : "";
+  return request<SupplyChain>(`/supply-chain${qs}`);
+}
+
+export function getSupplyChainWeather(options?: {
+  product?: string;
+  forceRefresh?: boolean;
+}): Promise<SupplyChainWeather> {
+  const params = new URLSearchParams();
+  if (options?.product) params.set("product", options.product);
+  if (options?.forceRefresh) params.set("force_refresh", "true");
+  const qs = params.toString();
+  return request<SupplyChainWeather>(`/supply-chain/weather${qs ? `?${qs}` : ""}`);
+}
+
+export async function uploadSupplyChain(file: File, product: string): Promise<SupplyChain> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("product", product);
+  const res = await fetch(`${API_BASE}/supply-chain/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    throw new Error(`POST /supply-chain/upload failed: ${res.status}`);
+  }
+  return res.json();
 }

@@ -54,6 +54,15 @@ const KIND_META: Record<
       return `${a.sent ? "Sent" : "Logged"} via ${a.channel ?? "mock channel"}: "${a.action ?? "an action"}".`;
     },
   },
+  ai_orchestration_completed: {
+    label: "AI orchestration agent",
+    icon: Robot,
+    summary: (p) => {
+      const o = p as { executive_summary?: string; source?: string; confidence?: number };
+      const confidence = typeof o.confidence === "number" ? ` Confidence: ${o.confidence.toFixed(2)}.` : "";
+      return `${o.executive_summary ?? "Completed incident orchestration."} Source: ${o.source ?? "AI"}.${confidence}`;
+    },
+  },
 };
 
 const MODEL_LABEL: Record<"claude" | "deepseek", string> = {

@@ -6,6 +6,7 @@ import {
   CaretDown,
   CheckCircle,
   Gauge,
+  ArrowClockwise,
   ListChecks,
   Robot,
   ShieldWarning,
@@ -16,9 +17,11 @@ import {
   AgentEventRow,
   Incident,
   IntegrationStatus,
+  SupplyChainWeather,
   approveAction,
   getConfig,
   getEvents,
+  getSupplyChainWeather,
   runIncident,
 } from "@/lib/api";
 import { AgentOutputPanel } from "@/components/AgentOutputPanel";
@@ -43,6 +46,9 @@ export default function ConsolePage() {
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<AgentEventRow[]>([]);
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
+  const [supplyWeather, setSupplyWeather] = useState<SupplyChainWeather | null>(null);
+  const [supplyWeatherLoading, setSupplyWeatherLoading] = useState(false);
+  const [supplyWeatherError, setSupplyWeatherError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
 
   useEffect(() => {
@@ -55,6 +61,23 @@ export default function ConsolePage() {
   useEffect(() => {
     getConfig().then(setStatus).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadSupplyWeather(false);
+  }, []);
+
+  async function loadSupplyWeather(forceRefresh: boolean) {
+    setSupplyWeatherLoading(true);
+    setSupplyWeatherError(null);
+    try {
+      const result = await getSupplyChainWeather({ forceRefresh });
+      setSupplyWeather(result);
+    } catch (err) {
+      setSupplyWeatherError(err instanceof Error ? err.message : "Failed to fetch supply-chain weather");
+    } finally {
+      setSupplyWeatherLoading(false);
+    }
+  }
 
   async function handleRun() {
     setLoading(true);
@@ -250,6 +273,16 @@ export default function ConsolePage() {
       </section>
       )}
 
+      {/* Supply weather */}
+      {tab === "supply-weather" && (
+      <SupplyWeatherPanel
+        weather={supplyWeather}
+        loading={supplyWeatherLoading}
+        error={supplyWeatherError}
+        onRefresh={() => loadSupplyWeather(true)}
+      />
+      )}
+
       {/* Agent reasoning */}
       {tab === "reasoning" && (
       <section>
@@ -348,6 +381,153 @@ export default function ConsolePage() {
   );
 }
 
+function SupplyWeatherPanel({
+  weather,
+  loading,
+  error,
+  onRefresh,
+}: {
+  weather: SupplyChainWeather | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const generated = weather ? new Date(weather.generated_at).toLocaleString() : "Not loaded";
+  const expires = weather ? new Date(weather.expires_at).toLocaleString() : "Not loaded";
+
+  return (
+    <section className="flex flex-col gap-6">
+      <div className="rounded-2xl border border-border bg-surface p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Supply-chain weather intelligence</h2>
+            <p className="mt-1 text-sm text-text-muted">
+              Open-Meteo numeric risk plus search context, refreshed every{" "}
+              {weather ? Math.round(weather.refresh_seconds / 3600) : 4} hours.
+            </p>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex w-fit items-center gap-2 rounded-full border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? <Spinner /> : <ArrowClockwise size={16} weight="bold" />}
+            Refresh
+          </button>
+        </div>
+
+        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+
+        <div className="mt-5 grid gap-4 text-sm sm:grid-cols-4">
+          <Stat label="Worst level" value={weather?.worst_risk_level ?? "Loading"} />
+          <Stat label="Max severity" value={weather ? weather.max_severity.toFixed(2) : "..."} />
+          <Stat label="Generated" value={generated} />
+          <Stat label="Next refresh" value={expires} />
+        </div>
+      </div>
+
+      {!weather && !error && (
+        <div className="rounded-2xl border border-dashed border-border bg-surface/40 p-8 text-sm text-text-muted">
+          {loading ? "Fetching supply-chain weather..." : "No weather intelligence loaded yet."}
+        </div>
+      )}
+
+      {weather && (
+        <div className="grid gap-4">
+          {weather.routes.length > 0 && (
+            <div className="rounded-2xl border border-border bg-surface p-5">
+              <h3 className="text-base font-semibold">Route risk lanes</h3>
+              <div className="mt-3 grid gap-2">
+                {weather.routes.slice(0, 6).map((route) => (
+                  <div
+                    key={route.supplier_id}
+                    className="rounded-xl border border-border bg-surface-2 p-3 text-sm"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-medium">
+                          {route.component} · {route.country} → {route.destination.city}
+                        </p>
+                        <p className="mt-0.5 text-xs text-text-muted">{route.context}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <RiskLevelPill level={route.worst_risk_level} />
+                        <span className="font-mono text-xs text-text-muted">
+                          {route.max_severity.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {weather.countries.map((country) => (
+            <article key={country.country} className="rounded-2xl border border-border bg-surface p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-semibold">{country.country}</h3>
+                    <RiskLevelPill level={country.risk_level} />
+                  </div>
+                  <p className="mt-2 max-w-4xl text-sm text-text-muted">{country.context}</p>
+                </div>
+                <div className="grid min-w-64 grid-cols-3 gap-2 text-right text-sm">
+                  <MiniMetric label="Wind" value={`${country.wind_kmh} km/h`} />
+                  <MiniMetric label="Rain" value={`${country.precipitation_mm} mm`} />
+                  <MiniMetric label="Score" value={country.severity.toFixed(2)} />
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-[1fr_1.4fr]">
+                <div className="rounded-xl border border-border bg-surface-2 p-3">
+                  <p className="text-xs uppercase tracking-wide text-text-muted">Supply exposure</p>
+                  <p className="mt-1 font-medium">
+                    {country.supplier_count} supplier{country.supplier_count === 1 ? "" : "s"} · $
+                    {country.value_usd.toLocaleString()}
+                  </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Avg criticality {country.avg_criticality.toFixed(2)} · {country.components.join(", ")}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-surface-2 p-3">
+                  <p className="text-xs uppercase tracking-wide text-text-muted">
+                    Context · {country.search.source}
+                  </p>
+                  <p className="mt-1 text-sm">{country.search.summary}</p>
+                  {country.search.results.length > 0 && (
+                    <ul className="mt-2 space-y-2">
+                      {country.search.results.slice(0, 2).map((result) => (
+                        <li key={result.url}>
+                          <a
+                            href={result.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium text-accent hover:underline"
+                          >
+                            {result.title}
+                          </a>
+                          {result.snippet && (
+                            <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">
+                              {result.snippet}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Spinner() {
   return (
     <motion.span
@@ -355,6 +535,31 @@ function Spinner() {
       transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
       className="block h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white"
     />
+  );
+}
+
+function RiskLevelPill({ level }: { level: "normal" | "watch" | "high" | "severe" }) {
+  const color =
+    level === "severe"
+      ? "bg-red-500/20 text-red-300"
+      : level === "high"
+        ? "bg-amber-500/20 text-amber-300"
+        : level === "watch"
+          ? "bg-sky-500/20 text-sky-300"
+          : "bg-accent-soft text-accent";
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-wide ${color}`}>
+      {level}
+    </span>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-text-muted">{label}</p>
+      <p className="mt-1 font-medium">{value}</p>
+    </div>
   );
 }
 
